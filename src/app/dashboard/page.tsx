@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { useRouter } from 'next/navigation'
 import { Plus, BookOpen, ArrowRight, Loader2, GraduationCap, LogOut, Home, Upload, X, Trash2, MessageSquare, Target, Code2, BarChart2 } from 'lucide-react'
@@ -65,6 +65,18 @@ export default function Dashboard() {
         { id: 'other', label: 'Other', emoji: '📚' },
     ]
 
+    const fetchSkills = useCallback(async (userId: string) => {
+        const { data, error } = await supabase
+            .from('skills')
+            .select('id, title, description, is_technical, created_at')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false })
+
+        if (error) toast.error('Could not load your skills. Please refresh the page.')
+        if (data) setSkills(data)
+        setLoading(false)
+    }, [supabase, toast])
+
     useEffect(() => {
         const getUser = async () => {
             const { data: { user } } = await supabase.auth.getUser()
@@ -86,7 +98,7 @@ export default function Dashboard() {
             }
         }
         getUser()
-    }, [router, supabase])
+    }, [router, supabase, fetchSkills])
 
     // Prevent body scroll when modal is open
     useEffect(() => {
@@ -99,18 +111,6 @@ export default function Dashboard() {
             document.body.style.overflow = 'unset'
         }
     }, [isCreating])
-
-    const fetchSkills = async (userId: string) => {
-        const { data, error } = await supabase
-            .from('skills')
-            .select('id, title, description, is_technical, created_at')
-            .eq('user_id', userId)
-            .order('created_at', { ascending: false })
-
-        if (error) toast.error('Could not load your skills. Please refresh the page.')
-        if (data) setSkills(data)
-        setLoading(false)
-    }
 
     const handleCreateSkill = async (e: React.FormEvent) => {
         e.preventDefault()

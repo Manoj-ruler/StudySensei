@@ -9,6 +9,9 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@langchain/core": "^1.2.16",
+    "@langchain/google-genai": "^2.3.2",
+    "@langchain/textsplitters": "^1.0.2",
     "@monaco-editor/react": "^4.7.0",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.86.0",
@@ -22,7 +25,9 @@
     "react-markdown": "^10.1.0",
     "recharts": "^3.5.1",
     "remark-gfm": "^4.0.1",
-    "tailwind-merge": "^3.4.0"
+    "tailwind-merge": "^3.4.0",
+    "unpdf": "^1.8.1",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

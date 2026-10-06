@@ -31,6 +31,19 @@ export interface DocumentUploadResponse {
     document_id: string
 }
 
+export interface DocumentSearchResult {
+    chunk_id: string
+    document_id: string
+    filename: string
+    page_number: number | null
+    similarity: number
+    content: string
+}
+
+export interface DocumentSearchResponse {
+    results: DocumentSearchResult[]
+}
+
 export interface RoadmapGenerateRequest {
     skill_id: string
     document_ids: string[]

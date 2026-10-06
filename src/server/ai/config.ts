@@ -12,6 +12,10 @@ export const aiConfig = {
         }
         return key
     },
+    /** Chat model for the mentor. A fast tier keeps the first token under a few seconds. */
+    chatModel: process.env.GEMINI_CHAT_MODEL ?? 'gemini-3.5-flash-lite',
+    /** Used when the primary model is unavailable or overloaded. */
+    chatFallbackModel: process.env.GEMINI_CHAT_FALLBACK_MODEL ?? 'gemini-flash-lite-latest',
     embeddingModel: process.env.GEMINI_EMBEDDING_MODEL ?? 'gemini-embedding-001',
     /** Must match the vector(768) column on document_chunks. */
     embeddingDimensions: 768,
@@ -34,4 +38,20 @@ export const ragConfig = {
      * and on-topic text around 0.7 or higher.
      */
     minSimilarity: 0.6,
+    /**
+     * Looser bar for a second pass when nothing clears minSimilarity. Broad
+     * questions ("what does my document cover?") match no single chunk strongly.
+     */
+    fallbackMinSimilarity: 0.5,
+    fallbackTopK: 4,
+} as const
+
+export const mentorConfig = {
+    maxMessageCharacters: 4000,
+    /** Earlier turns sent to the model, newest last. Older turns are dropped. */
+    historyMessages: 10,
+    /** Each earlier turn is cut to this length so one long answer cannot crowd out the rest. */
+    historyMessageCharacters: 2000,
+    maxOutputTokens: 2048,
+    temperature: 0.4,
 } as const

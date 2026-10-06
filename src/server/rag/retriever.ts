@@ -22,6 +22,11 @@ export interface SkillChunkRetrieverInput extends BaseRetrieverInput {
     skillId: string
     k?: number
     minSimilarity?: number
+    /**
+     * When true and nothing clears minSimilarity, return a few weaker matches
+     * instead of nothing. Callers can tell from each chunk's similarity.
+     */
+    allowWeakMatches?: boolean
 }
 
 /**
@@ -37,6 +42,7 @@ export class SkillChunkRetriever extends BaseRetriever {
     private readonly skillId: string
     private readonly k: number
     private readonly minSimilarity: number
+    private readonly allowWeakMatches: boolean
 
     constructor(input: SkillChunkRetrieverInput) {
         super(input)
@@ -44,20 +50,34 @@ export class SkillChunkRetriever extends BaseRetriever {
         this.skillId = input.skillId
         this.k = input.k ?? ragConfig.topK
         this.minSimilarity = input.minSimilarity ?? ragConfig.minSimilarity
+        this.allowWeakMatches = input.allowWeakMatches ?? false
+    }
+
+    /** `invoke()` with the metadata type preserved (the base class returns untyped documents). */
+    async retrieve(query: string): Promise<Document<ChunkMetadata>[]> {
+        return (await this.invoke(query)) as Document<ChunkMetadata>[]
     }
 
     async _getRelevantDocuments(query: string): Promise<Document<ChunkMetadata>[]> {
         const embedding = await queryEmbeddings().embedQuery(query)
 
-        const { data, error } = await this.supabase.rpc('match_chunks', {
-            query_embedding: JSON.stringify(embedding),
-            p_skill_id: this.skillId,
-            match_count: this.k,
-            min_similarity: this.minSimilarity,
-        })
-        if (error) throw new Error(`Vector search failed: ${error.message}`)
+        const search = async (matchCount: number, minSimilarity: number) => {
+            const { data, error } = await this.supabase.rpc('match_chunks', {
+                query_embedding: JSON.stringify(embedding),
+                p_skill_id: this.skillId,
+                match_count: matchCount,
+                min_similarity: minSimilarity,
+            })
+            if (error) throw new Error(`Vector search failed: ${error.message}`)
+            return data ?? []
+        }
 
-        return (data ?? []).map(
+        let rows = await search(this.k, this.minSimilarity)
+        if (rows.length === 0 && this.allowWeakMatches) {
+            rows = await search(ragConfig.fallbackTopK, ragConfig.fallbackMinSimilarity)
+        }
+
+        return rows.map(
             (row) =>
                 new Document<ChunkMetadata>({
                     pageContent: row.content,

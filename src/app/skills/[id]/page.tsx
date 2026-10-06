@@ -184,6 +184,45 @@ export default function SkillPage() {
         fetchDocuments()
     }, [fetchDocuments])
 
+    // Resume the most recent conversation for this skill.
+    useEffect(() => {
+        let cancelled = false
+        const loadHistory = async () => {
+            const { data: chat } = await supabase
+                .from('chats')
+                .select('id')
+                .eq('skill_id', id)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle()
+            if (!chat || cancelled) return
+
+            const { data: rows } = await supabase
+                .from('messages')
+                .select('role, content, mode, sources')
+                .eq('chat_id', chat.id)
+                .order('created_at', { ascending: true })
+            if (!rows || cancelled) return
+
+            setChatId(chat.id)
+            // Only fill an empty view: the learner may already have started typing.
+            setMessages(current =>
+                current.length > 0
+                    ? current
+                    : rows.map(row => ({
+                        role: row.role === 'assistant' ? 'assistant' : 'user',
+                        content: row.content,
+                        mode: isMentorMode(row.mode) ? row.mode : undefined,
+                        sources: Array.isArray(row.sources) ? (row.sources as unknown as MessageSource[]) : undefined,
+                    }))
+            )
+        }
+        loadHistory()
+        return () => {
+            cancelled = true
+        }
+    }, [id, supabase])
+
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
     }, [messages])
@@ -195,6 +234,12 @@ export default function SkillPage() {
         const interval = setInterval(fetchDocuments, 4000)
         return () => clearInterval(interval)
     }, [hasUnfinishedDocuments, fetchDocuments])
+
+    // Messages for the selected mode; the reply placeholder stays hidden until text arrives.
+    const visibleMessages = messages.filter(
+        m => (!m.mode || m.mode === mode) && !(m.role === 'assistant' && !m.content)
+    )
+    const awaitingFirstToken = sending && messages[messages.length - 1]?.content === ''
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const value = e.target.value
@@ -239,28 +284,34 @@ export default function SkillPage() {
         setInput('')
         setSending(true)
 
-        try {
-            const data = await api.mentor.sendMessage({
-                skill_id: id,
-                chat_id: chatId,
-                message: userMsg,
-                mode: mode
+        // Placeholder that fills in as the answer streams.
+        setMessages(prev => [...prev, { role: 'assistant', content: '', mode: mode }])
+        const updateReply = (change: (reply: Message) => Message) =>
+            setMessages(prev => {
+                const next = [...prev]
+                next[next.length - 1] = change(next[next.length - 1])
+                return next
             })
+        const showError = (message: string) =>
+            updateReply(reply => ({
+                ...reply,
+                content: reply.content ? `${reply.content}
 
-            if (!chatId) setChatId(data.chat_id)
-            setMessages(prev => [...prev, {
-                role: 'assistant',
-                content: data.response,
-                sources: data.sources,
-                mode: data.mode ?? mode
-            }])
+_${message}_` : message,
+            }))
+
+        try {
+            await api.mentor.streamMessage(
+                { skill_id: id, chat_id: chatId, message: userMsg, mode: mode },
+                (event) => {
+                    if (event.type === 'meta') setChatId(event.chat_id)
+                    else if (event.type === 'delta') updateReply(reply => ({ ...reply, content: reply.content + event.text }))
+                    else if (event.type === 'done') updateReply(reply => ({ ...reply, sources: event.sources }))
+                    else showError(event.message)
+                }
+            )
         } catch (error) {
-            // Shown in the conversation, tagged with the current mode so it is not filtered out
-            setMessages(prev => [...prev, {
-                role: 'assistant',
-                content: errorMessage(error, 'Sorry, I could not get a response. Please try again.'),
-                mode: mode
-            }])
+            showError(errorMessage(error, 'Sorry, I could not get a response. Please try again.'))
         } finally {
             setSending(false)
         }
@@ -405,7 +456,7 @@ export default function SkillPage() {
                 {/* Messages - Centered floating container */}
                 <div className="flex-1 overflow-y-auto custom-scrollbar">
                     <div className="max-w-4xl mx-auto space-y-8 py-8">
-                        {messages.filter(m => !m.mode || m.mode === mode).length === 0 ? (
+                        {visibleMessages.length === 0 ? (
                             <div className="h-full flex flex-col items-center justify-center text-gray-400 space-y-6 animate-in fade-in duration-700">
                                 <div className="w-24 h-24 rounded-full bg-purple-100 flex items-center justify-center border border-purple-200 shadow-xl shadow-purple-100/50">
                                     <Bot className="h-10 w-10 text-purple-600" />
@@ -417,7 +468,7 @@ export default function SkillPage() {
                             </div>
                         ) : (
                             <>
-                                {messages.filter(m => !m.mode || m.mode === mode).map((msg, idx) => (
+                                {visibleMessages.map((msg, idx) => (
                                     <motion.div
                                         key={idx}
                                         initial={{ opacity: 0, y: 10 }}
@@ -461,12 +512,15 @@ export default function SkillPage() {
                                             )}
 
                                             {msg.sources && msg.sources.length > 0 && (
-                                                <div className="mt-4 pt-4 border-t border-white/20">
+                                                <div className="mt-4 pt-4 border-t border-gray-200">
                                                     <p className="text-xs uppercase tracking-wider mb-2 opacity-60">Sources</p>
                                                     <div className="space-y-2">
                                                         {msg.sources.map((src, i) => (
-                                                            <div key={i} className="text-xs bg-white/10 p-2 rounded">
-                                                                <p className="font-semibold">{src.title}</p>
+                                                            <div key={i} className="text-xs bg-gray-50 border border-gray-200 p-2 rounded">
+                                                                <p className="font-semibold">
+                                                                    [{src.index}] {src.filename}
+                                                                    {src.page_number ? ` · p. ${src.page_number}` : ''}
+                                                                </p>
                                                             </div>
                                                         ))}
                                                     </div>
@@ -478,7 +532,7 @@ export default function SkillPage() {
                                 ))}
 
                                 {/* Typing Indicator - Shows while AI is thinking */}
-                                {sending && (
+                                {awaitingFirstToken && (
                                     <motion.div
                                         initial={{ opacity: 0, y: 10 }}
                                         animate={{ opacity: 1, y: 0 }}

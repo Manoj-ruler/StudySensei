@@ -4,7 +4,7 @@ import type {
     GenerateQuestionRequest,
     GenerateQuestionResponse,
     MentorMessageRequest,
-    MentorMessageResponse,
+    MentorStreamEvent,
     QuizGenerateRequest,
     QuizGenerateResponse,
     QuizHistoryResponse,
@@ -61,6 +61,59 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     return body as T
 }
 
+/** POSTs JSON and reads a newline-delimited JSON response as it arrives. */
+async function streamNdjson<TEvent>(
+    path: string,
+    payload: unknown,
+    onEvent: (event: TEvent) => void
+): Promise<void> {
+    let response: Response
+    try {
+        response = await fetch(`/api${path}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        })
+    } catch {
+        throw new ApiError('Could not reach the server. Check your connection.', 0, 'NETWORK')
+    }
+
+    if (!response.ok || !response.body) {
+        const body = (await response.json().catch(() => null)) as
+            | { error?: { code?: string; message?: string } }
+            | null
+        throw new ApiError(
+            body?.error?.message ?? `Request failed (${response.status}).`,
+            response.status,
+            body?.error?.code ?? 'UNKNOWN'
+        )
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffered = ''
+    const flush = (final: boolean) => {
+        const lines = buffered.split('\n')
+        buffered = final ? '' : (lines.pop() ?? '')
+        for (const line of lines) {
+            if (line.trim()) onEvent(JSON.parse(line) as TEvent)
+        }
+    }
+
+    try {
+        for (;;) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buffered += decoder.decode(value, { stream: true })
+            flush(false)
+        }
+        buffered += decoder.decode()
+        flush(true)
+    } catch {
+        throw new ApiError('The connection was interrupted. Please try again.', 0, 'NETWORK')
+    }
+}
+
 function postJson<T>(path: string, payload: unknown): Promise<T> {
     return request<T>(path, {
         method: 'POST',
@@ -71,8 +124,12 @@ function postJson<T>(path: string, payload: unknown): Promise<T> {
 
 export const api = {
     mentor: {
-        sendMessage: (payload: MentorMessageRequest) =>
-            postJson<MentorMessageResponse>('/mentor/message', payload),
+        /**
+         * Sends a message and calls `onEvent` for each streamed event as the
+         * answer is generated. Rejects with ApiError if the request itself fails.
+         */
+        streamMessage: (payload: MentorMessageRequest, onEvent: (event: MentorStreamEvent) => void) =>
+            streamNdjson<MentorStreamEvent>('/mentor/message', payload, onEvent),
     },
     documents: {
         upload: (file: File, skillId: string) => {

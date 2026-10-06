@@ -8,7 +8,7 @@ import DashboardHeader from '@/components/DashboardHeader'
 import HomeFooter from '@/components/HomeFooter'
 import { useToast } from '@/components/ToastProvider'
 import { api, errorMessage } from '@/lib/api/client'
-import type { PastQuiz, QuizQuestion as Question } from '@/lib/api/types'
+import type { PastQuiz, QuizAnswerResponse, QuizQuestion as Question } from '@/lib/api/types'
 
 export default function QuizPage() {
     const params = useParams()
@@ -20,10 +20,12 @@ export default function QuizPage() {
     const [generationError, setGenerationError] = useState<string | null>(null)
     const [currentQuestion, setCurrentQuestion] = useState(0)
     const [selectedOption, setSelectedOption] = useState<number | null>(null)
-    const [showExplanation, setShowExplanation] = useState(false)
+    // Set once the server has graded the current question; holds the correct answer and explanation.
+    const [result, setResult] = useState<QuizAnswerResponse | null>(null)
+    const [checking, setChecking] = useState(false)
     const [score, setScore] = useState(0)
     const [quizCompleted, setQuizCompleted] = useState(false)
-    const [userAnswers, setUserAnswers] = useState<number[]>([])
+    const showExplanation = result !== null
 
     // Past quizzes
     const [showHistory, setShowHistory] = useState(false)
@@ -53,13 +55,13 @@ export default function QuizPage() {
         setCurrentQuestion(0)
         setScore(0)
         setQuestions([])
-        setUserAnswers([])
+        setSelectedOption(null)
+        setResult(null)
         setShowHistory(false)
 
         try {
             const data = await api.quiz.generate({ skill_id: id, num_questions: 5 })
             setQuestions(data.questions)
-            setUserAnswers(new Array(data.questions.length).fill(-1))
             toast.success(`Quiz generated with ${data.questions.length} questions!`)
         } catch (error) {
             const message = errorMessage(error, 'Failed to generate quiz. Please try again.')
@@ -70,51 +72,37 @@ export default function QuizPage() {
         }
     }
 
-    const handleOptionSelect = (index: number) => {
-        if (showExplanation) return
+    const handleOptionSelect = async (index: number) => {
+        if (showExplanation || checking) return
         setSelectedOption(index)
-        setShowExplanation(true)
+        setChecking(true)
 
-        const newAnswers = [...userAnswers]
-        newAnswers[currentQuestion] = index
-        setUserAnswers(newAnswers)
-
-        if (index === questions[currentQuestion].correct_answer) {
-            setScore(prev => prev + 1)
+        try {
+            // The server grades the answer; the browser never holds the answer key.
+            const graded = await api.quiz.answer({
+                question_id: questions[currentQuestion].id,
+                answer: index,
+            })
+            setResult(graded)
+            setScore(graded.score)
+        } catch (error) {
+            setSelectedOption(null)
+            toast.error(errorMessage(error, 'Your answer could not be checked. Please try again.'))
+        } finally {
+            setChecking(false)
         }
     }
 
-    const handleNextQuestion = async () => {
+    const handleNextQuestion = () => {
         setSelectedOption(null)
-        setShowExplanation(false)
+        setResult(null)
 
         if (currentQuestion + 1 < questions.length) {
             setCurrentQuestion(prev => prev + 1)
         } else {
             setQuizCompleted(true)
-            // Save Quiz Result
-            try {
-                const questionsData = questions.map((q, idx) => ({
-                    question: q.question,
-                    options: q.options,
-                    correct_answer: q.correct_answer,
-                    user_answer: userAnswers[idx],
-                    is_correct: userAnswers[idx] === q.correct_answer
-                }))
-
-                await api.quiz.save({
-                    skill_id: id,
-                    // handleOptionSelect already counted the final answer
-                    score: score,
-                    total_questions: questions.length,
-                    questions: questionsData
-                })
-
-                // Refresh history
-                fetchHistory()
-            } catch (error) {
-                toast.error(errorMessage(error, 'Your quiz result could not be saved.'))
-            }
+            // The server completed and scored the quiz with the last answer.
+            fetchHistory()
         }
     }
 
@@ -407,7 +395,7 @@ export default function QuizPage() {
                                 let buttonStyle = "bg-gray-50 hover:bg-gray-100 border-gray-200 text-gray-900"
 
                                 if (showExplanation) {
-                                    if (idx === question.correct_answer) {
+                                    if (idx === result?.correct_answer) {
                                         buttonStyle = "bg-green-50 border-green-500 text-green-900"
                                     } else if (idx === selectedOption) {
                                         buttonStyle = "bg-red-50 border-red-500 text-red-900"
@@ -422,14 +410,14 @@ export default function QuizPage() {
                                     <button
                                         key={idx}
                                         onClick={() => handleOptionSelect(idx)}
-                                        disabled={showExplanation}
+                                        disabled={showExplanation || checking}
                                         className={`w-full text-left p-4 rounded-xl border-2 transition-all duration-200 flex items-center justify-between group ${buttonStyle}`}
                                     >
                                         <span className="font-medium">{option}</span>
-                                        {showExplanation && idx === question.correct_answer && (
+                                        {showExplanation && idx === result?.correct_answer && (
                                             <CheckCircle className="h-5 w-5 text-green-600" />
                                         )}
-                                        {showExplanation && idx === selectedOption && idx !== question.correct_answer && (
+                                        {showExplanation && idx === selectedOption && idx !== result?.correct_answer && (
                                             <XCircle className="h-5 w-5 text-red-600" />
                                         )}
                                     </button>
@@ -443,7 +431,7 @@ export default function QuizPage() {
                         <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
                             <div className="bg-purple-50 border-2 border-purple-200 rounded-xl p-6 mb-6">
                                 <h3 className="font-bold text-purple-900 mb-2">Explanation</h3>
-                                <p className="text-purple-800">{question.explanation}</p>
+                                <p className="text-purple-800">{result?.explanation}</p>
                             </div>
 
                             <button

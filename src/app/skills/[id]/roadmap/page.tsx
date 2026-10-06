@@ -10,6 +10,7 @@ import DashboardHeader from '@/components/DashboardHeader'
 import HomeFooter from '@/components/HomeFooter'
 import { useToast } from '@/components/ToastProvider'
 import { api, errorMessage } from '@/lib/api/client'
+import RoadmapTasks, { type RoadmapTask } from '@/components/RoadmapTasks'
 import { DOCUMENT_ACCEPT, documentState, isDocumentInProgress, type SkillDocument } from '@/lib/documents'
 
 interface SkillWithRoadmap {
@@ -151,6 +152,8 @@ export default function RoadmapPage() {
     const [supabase] = useState(() => createClient())
 
     const [skill, setSkill] = useState<SkillWithRoadmap | null>(null)
+    // Trackable roadmap tasks; skills generated before task tracking only have markdown.
+    const [tasks, setTasks] = useState<RoadmapTask[]>([])
     const [loading, setLoading] = useState(true)
     const [generating, setGenerating] = useState(false)
     const [documents, setDocuments] = useState<SkillDocument[]>([])
@@ -174,6 +177,14 @@ export default function RoadmapPage() {
             .order('created_at', { ascending: false })
 
         if (docsData) setDocuments(docsData)
+
+        const { data: taskData } = await supabase
+            .from('learning_tasks')
+            .select('id, title, description, task_type, status, phase, phase_name, topic, position')
+            .eq('skill_id', id)
+            .order('position')
+
+        if (taskData) setTasks(taskData)
         setLoading(false)
     }, [id, supabase])
 
@@ -193,8 +204,12 @@ export default function RoadmapPage() {
         setGenerating(true)
         try {
             const data = await api.roadmap.generate({ skill_id: id, document_ids: selectedDocs })
-            setSkill((current) => (current ? { ...current, roadmap: data.roadmap } : current))
-            toast.success('Roadmap generated successfully!')
+            await fetchData()
+            toast.success(
+                data.grounded
+                    ? `Roadmap generated from your documents: ${data.task_count} tasks.`
+                    : `Roadmap generated: ${data.task_count} tasks. Upload documents to tailor it to your material.`
+            )
         } catch (error) {
             toast.error(errorMessage(error, 'Failed to generate roadmap. Please try again.'))
         } finally {
@@ -240,6 +255,20 @@ export default function RoadmapPage() {
             toast.error(errorMessage(error, 'Failed to process document'))
         }
     }, [fetchData, toast])
+
+    const handleToggleTask = useCallback(async (task: RoadmapTask, done: boolean) => {
+        const status = done ? 'done' : 'todo'
+        // Update the view first; restore it if the save fails.
+        setTasks(prev => prev.map(t => (t.id === task.id ? { ...t, status } : t)))
+        const { error } = await supabase
+            .from('learning_tasks')
+            .update({ status, progress_percentage: done ? 100 : 0 })
+            .eq('id', task.id)
+        if (error) {
+            setTasks(prev => prev.map(t => (t.id === task.id ? { ...t, status: task.status } : t)))
+            toast.error('Could not save your progress. Please try again.')
+        }
+    }, [supabase, toast])
 
     const toggleDocSelection = useCallback((docId: string) => {
         setSelectedDocs(prev =>
@@ -319,9 +348,11 @@ export default function RoadmapPage() {
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     {/* Main Roadmap Area */}
                     <div className="lg:col-span-2 space-y-6">
-                        {skill?.roadmap ? (
+                        {skill?.roadmap || tasks.length > 0 ? (
                             <>
-                                {parsedRoadmap.map((section, idx) => (
+                                {tasks.length > 0 ? (
+                                    <RoadmapTasks skillId={id} tasks={tasks} onToggle={handleToggleTask} />
+                                ) : parsedRoadmap.map((section, idx) => (
                                     <div key={idx} className="space-y-4">
                                         {/* Section Header */}
                                         {section.title && (

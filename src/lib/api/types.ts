@@ -49,21 +49,31 @@ export interface DocumentSearchResponse {
     results: DocumentSearchResult[]
 }
 
+// --- Roadmap ---------------------------------------------------------------
+
+export const ROADMAP_TASK_TYPES = ['study', 'practice', 'quiz', 'challenge', 'project'] as const
+export type RoadmapTaskType = (typeof ROADMAP_TASK_TYPES)[number]
+
 export interface RoadmapGenerateRequest {
     skill_id: string
     document_ids: string[]
 }
 
 export interface RoadmapGenerateResponse {
+    /** Markdown summary; the trackable tasks are stored in learning_tasks. */
     roadmap: string
-    roadmap_svg?: string | null
+    task_count: number
+    /** True when the roadmap was based on the learner's uploaded documents. */
+    grounded: boolean
 }
 
+// --- Quiz ------------------------------------------------------------------
+
+/** A question as sent to the browser: the answer key stays on the server. */
 export interface QuizQuestion {
+    id: string
     question: string
     options: string[]
-    correct_answer: number
-    explanation: string
 }
 
 export interface QuizGenerateRequest {
@@ -72,22 +82,35 @@ export interface QuizGenerateRequest {
 }
 
 export interface QuizGenerateResponse {
+    quiz_id: string
     questions: QuizQuestion[]
+    /** True when the questions were based on the learner's uploaded documents. */
+    grounded: boolean
+}
+
+export interface QuizAnswerRequest {
+    question_id: string
+    answer: number
+}
+
+/** Result of grading one answer on the server. */
+export interface QuizAnswerResponse {
+    is_correct: boolean
+    correct_answer: number
+    explanation: string | null
+    /** True once every question of the quiz has been answered. */
+    quiz_completed: boolean
+    score: number
+    total_questions: number
 }
 
 export interface AnsweredQuizQuestion {
     question: string
     options: string[]
     correct_answer: number
-    user_answer: number
+    user_answer: number | null
     is_correct: boolean
-}
-
-export interface QuizSaveRequest {
-    skill_id: string
-    score: number
-    total_questions: number
-    questions: AnsweredQuizQuestion[]
+    explanation?: string | null
 }
 
 export interface PastQuiz {
@@ -101,6 +124,8 @@ export interface PastQuiz {
 export interface QuizHistoryResponse {
     quizzes: PastQuiz[]
 }
+
+// --- Coding ----------------------------------------------------------------
 
 export interface CodingQuestion {
     id: string
@@ -140,16 +165,26 @@ export interface SubmitCodeResponse {
     results: TestResult[]
 }
 
+// --- Analytics -------------------------------------------------------------
+
 export interface ActivityRecord {
     activity_type: 'quiz' | 'code' | 'chat'
     score: number | null
+    max_score: number | null
+    created_at: string
 }
 
 export interface SkillAnalyticsResponse {
     summary: {
         total_quizzes: number
+        /** Share of all quiz questions answered correctly, 0..1; null before the first quiz. */
         combined_avg_score: number | null
         code_challenges_solved: number
+        roadmap_tasks_done: number
+        roadmap_tasks_total: number
+        questions_asked: number
+        documents_ready: number
+        documents_total: number
     }
     history: ActivityRecord[]
 }

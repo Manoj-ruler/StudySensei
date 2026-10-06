@@ -1,5 +1,6 @@
 import 'server-only'
 import { ChatGoogleGenerativeAI } from '@langchain/google-genai'
+import type { z } from 'zod'
 import { aiConfig } from '@/server/ai/config'
 
 interface ChatModelOptions {
@@ -26,4 +27,17 @@ export function chatModel(options: ChatModelOptions) {
     return gemini(aiConfig.chatModel, options).withFallbacks([
         gemini(aiConfig.chatFallbackModel, options),
     ])
+}
+
+/**
+ * A chat model constrained to return data matching `schema` (via Gemini's
+ * structured output), with the same fallback behaviour as `chatModel`.
+ */
+export function structuredModel<TOutput extends Record<string, unknown>>(
+    schema: z.ZodType<TOutput>,
+    options: ChatModelOptions
+) {
+    const build = (model: string) =>
+        gemini(model, options).withStructuredOutput<TOutput>(schema)
+    return build(aiConfig.chatModel).withFallbacks([build(aiConfig.chatFallbackModel)])
 }

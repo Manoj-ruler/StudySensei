@@ -1,44 +1,23 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
-import { Loader2, CheckCircle, XCircle, ArrowRight, RefreshCw, ChevronLeft, ChevronDown, ChevronUp, Clock, Award } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { useParams } from 'next/navigation'
+import { Loader2, CheckCircle, XCircle, ArrowRight, RefreshCw, ChevronLeft, ChevronDown, ChevronUp, Clock, Award, Sparkles } from 'lucide-react'
 import Link from 'next/link'
-import { createClient } from '@/utils/supabase/client'
 import DashboardHeader from '@/components/DashboardHeader'
 import HomeFooter from '@/components/HomeFooter'
 import { useToast } from '@/components/ToastProvider'
-
-interface Question {
-    question: string
-    options: string[]
-    correct_answer: number
-    explanation: string
-}
-
-interface PastQuizQuestion {
-    question: string
-    options: string[]
-    correct_answer: number
-    user_answer: number
-    is_correct: boolean
-}
-
-interface PastQuiz {
-    id: string
-    score: number
-    total_questions: number
-    created_at: string
-    questions: PastQuizQuestion[]
-}
+import { api, errorMessage } from '@/lib/api/client'
+import type { PastQuiz, QuizQuestion as Question } from '@/lib/api/types'
 
 export default function QuizPage() {
     const params = useParams()
     const id = params.id as string
-    const router = useRouter()
 
     const [questions, setQuestions] = useState<Question[]>([])
-    const [loading, setLoading] = useState(true)
+    // A quiz is generated only when the user asks for one: generation costs an LLM call.
+    const [loading, setLoading] = useState(false)
+    const [generationError, setGenerationError] = useState<string | null>(null)
     const [currentQuestion, setCurrentQuestion] = useState(0)
     const [selectedOption, setSelectedOption] = useState<number | null>(null)
     const [showExplanation, setShowExplanation] = useState(false)
@@ -50,29 +29,26 @@ export default function QuizPage() {
     const [showHistory, setShowHistory] = useState(false)
     const [pastQuizzes, setPastQuizzes] = useState<PastQuiz[]>([])
     const [expandedQuiz, setExpandedQuiz] = useState<string | null>(null)
-    const [loadingHistory, setLoadingHistory] = useState(false)
+    const [loadingHistory, setLoadingHistory] = useState(true)
     const toast = useToast()
 
-    useEffect(() => {
-        fetchQuiz()
-        fetchHistory()
-    }, [])
+    const fetchHistory = useCallback(
+        () =>
+            api.quiz.history(id)
+                .then((data) => setPastQuizzes(data.quizzes || []))
+                // History is secondary; the history view shows its empty state.
+                .catch(() => setPastQuizzes([]))
+                .finally(() => setLoadingHistory(false)),
+        [id]
+    )
 
-    const fetchHistory = async () => {
-        setLoadingHistory(true)
-        try {
-            const response = await fetch(`http://localhost:8000/quiz/history/${id}`)
-            const data = await response.json()
-            setPastQuizzes(data.quizzes || [])
-        } catch (error) {
-            console.error('Failed to fetch quiz history:', error)
-        } finally {
-            setLoadingHistory(false)
-        }
-    }
+    useEffect(() => {
+        fetchHistory()
+    }, [fetchHistory])
 
     const fetchQuiz = async () => {
         setLoading(true)
+        setGenerationError(null)
         setQuizCompleted(false)
         setCurrentQuestion(0)
         setScore(0)
@@ -81,21 +57,14 @@ export default function QuizPage() {
         setShowHistory(false)
 
         try {
-            const response = await fetch('http://localhost:8000/quiz/generate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ skill_id: id, num_questions: 5 })
-            })
-
-            const data = await response.json()
-            if (data.questions) {
-                setQuestions(data.questions)
-                setUserAnswers(new Array(data.questions.length).fill(-1))
-                toast.success(`Quiz generated with ${data.questions.length} questions!`)
-            }
+            const data = await api.quiz.generate({ skill_id: id, num_questions: 5 })
+            setQuestions(data.questions)
+            setUserAnswers(new Array(data.questions.length).fill(-1))
+            toast.success(`Quiz generated with ${data.questions.length} questions!`)
         } catch (error) {
-            console.error('Failed to fetch quiz:', error)
-            toast.error('Failed to generate quiz. Please try again.')
+            const message = errorMessage(error, 'Failed to generate quiz. Please try again.')
+            setGenerationError(message)
+            toast.error(message)
         } finally {
             setLoading(false)
         }
@@ -133,26 +102,18 @@ export default function QuizPage() {
                     is_correct: userAnswers[idx] === q.correct_answer
                 }))
 
-                const supabase = createClient()
-                const { data: { user } } = await supabase.auth.getUser()
-
-                await fetch('http://localhost:8000/quiz/save', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        skill_id: id,
-                        user_id: user?.id,
-                        // handleOptionSelect already counted the final answer
-                        score: score,
-                        total_questions: questions.length,
-                        questions: questionsData
-                    })
+                await api.quiz.save({
+                    skill_id: id,
+                    // handleOptionSelect already counted the final answer
+                    score: score,
+                    total_questions: questions.length,
+                    questions: questionsData
                 })
 
                 // Refresh history
                 fetchHistory()
             } catch (error) {
-                console.error('Failed to save quiz result:', error)
+                toast.error(errorMessage(error, 'Your quiz result could not be saved.'))
             }
         }
     }
@@ -351,12 +312,40 @@ export default function QuizPage() {
         return (
             <div className="min-h-screen flex flex-col bg-gradient-to-br from-purple-50 via-white to-pink-50">
                 <DashboardHeader />
-                <div className="flex-1 flex items-center justify-center">
-                    <div className="text-center">
-                        <p className="text-xl text-gray-600 mb-4">No questions could be generated.</p>
-                        <Link href={`/dashboard`} className="text-purple-600 hover:underline">
-                            Go back to dashboard
-                        </Link>
+                <div className="flex-1 flex items-center justify-center p-4">
+                    <div className="max-w-md w-full bg-white rounded-2xl p-8 border border-gray-200 text-center shadow-xl">
+                        <h2 className="text-2xl font-bold text-gray-900 mb-2">Ready for a quiz?</h2>
+                        <p className="text-gray-600 mb-6">
+                            Generate 5 questions based on this skill and your documents.
+                        </p>
+                        {generationError && (
+                            <p className="mb-6 p-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-600">
+                                {generationError}
+                            </p>
+                        )}
+                        <div className="space-y-3">
+                            <button
+                                onClick={fetchQuiz}
+                                className="w-full flex items-center justify-center bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-xl font-semibold transition-colors"
+                            >
+                                <Sparkles className="h-5 w-5 mr-2" />
+                                {generationError ? 'Try Again' : 'Start Quiz'}
+                            </button>
+                            <button
+                                onClick={() => setShowHistory(true)}
+                                className="w-full flex items-center justify-center bg-pink-600 hover:bg-pink-700 text-white py-3 rounded-xl font-semibold transition-colors"
+                            >
+                                <Award className="h-5 w-5 mr-2" />
+                                View Past Quizzes
+                            </button>
+                            <Link
+                                href={`/dashboard`}
+                                className="w-full flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 rounded-xl font-semibold transition-colors"
+                            >
+                                <ChevronLeft className="h-5 w-5 mr-2" />
+                                Back to Dashboard
+                            </Link>
+                        </div>
                     </div>
                 </div>
                 <HomeFooter />

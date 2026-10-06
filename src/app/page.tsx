@@ -3,12 +3,13 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { useRouter } from 'next/navigation'
-import { GraduationCap, Sparkles, Target, Code, ArrowRight, LogOut, Brain, Zap, Trophy, Github, Twitter, Linkedin } from 'lucide-react'
+import { GraduationCap, Sparkles, Target, Code, ArrowRight, LogOut, Brain, Zap, Trophy } from 'lucide-react'
 import Link from 'next/link'
+import type { User } from '@supabase/supabase-js'
 import { motion } from 'framer-motion'
 
 export default function Home() {
-  const [user, setUser] = useState<any>(null)
+  const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const router = useRouter()
   const supabase = createClient()

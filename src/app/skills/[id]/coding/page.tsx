@@ -1,30 +1,22 @@
 'use client'
 
 import { useEffect, useState, useRef } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import CodeEditor from '@/components/CodeEditor'
 import { createClient } from '@/utils/supabase/client'
 import {
-    Play, ChevronLeft, Loader2, List, Code, CheckCircle, XCircle, RefreshCw
+    Play, ChevronLeft, Loader2, Code, CheckCircle, XCircle, RefreshCw
 } from 'lucide-react'
 import Link from 'next/link'
 import ReactMarkdown from 'react-markdown'
 import { useToast } from '@/components/ToastProvider'
+import { api, errorMessage } from '@/lib/api/client'
+import type { CodeLanguage, CodingQuestion, TestResult } from '@/lib/api/types'
 
-interface TestResult {
-    input: string
-    expected: string
-    actual: string
-    passed: boolean
-    is_hidden: boolean
-    error?: string
-}
-
-interface Question {
-    id: string
-    title: string
-    description: string
-    difficulty: string
+// Starter code per language
+const BOILERPLATE: Record<CodeLanguage, string> = {
+    python: `# Write your Python code here\n\ndef solution(input_str):\n    # Your code\n    return input_str\n\n# Do not modify the input reading logic if provided\nimport sys\n# input_str = sys.stdin.read()\n# print(solution(input_str))\n`,
+    javascript: `// Write your JavaScript code here\n\nfunction solution(inputStr) {\n    // Your code\n    return inputStr;\n}\n\n// Do not modify standard input reading\nconst fs = require('fs');\nconst input = fs.readFileSync(0, 'utf-8');\n// console.log(solution(input));\n`
 }
 
 export default function CodingPage() {
@@ -32,56 +24,46 @@ export default function CodingPage() {
     const id = params.id as string // Skill ID
 
     // State
-    const [question, setQuestion] = useState<Question | null>(null)
-    const [language, setLanguage] = useState<string>("python")
-    const [code, setCode] = useState<string>("")
-    // Boilerplate for languages
-    const BOILERPLATE: Record<string, string> = {
-        python: `# Write your Python code here\n\ndef solution(input_str):\n    # Your code\n    return input_str\n\n# Do not modify the input reading logic if provided\nimport sys\n# input_str = sys.stdin.read()\n# print(solution(input_str))\n`,
-        javascript: `// Write your JavaScript code here\n\nfunction solution(inputStr) {\n    // Your code\n    return inputStr;\n}\n\n// Do not modify standard input reading\nconst fs = require('fs');\nconst input = fs.readFileSync(0, 'utf-8');\n// console.log(solution(input));\n`
-    }
-
-    useEffect(() => {
-        // Set initial boilerplate
-        setCode(BOILERPLATE[language])
-    }, [language])
+    const [question, setQuestion] = useState<CodingQuestion | null>(null)
+    const [language, setLanguage] = useState<CodeLanguage>("python")
+    const [code, setCode] = useState<string>(BOILERPLATE.python)
     const [loading, setLoading] = useState(true)
     const [running, setRunning] = useState(false)
     const [results, setResults] = useState<TestResult[] | null>(null)
     const [generating, setGenerating] = useState(false)
 
-    const supabase = createClient()
-    const router = useRouter()
+    const [supabase] = useState(() => createClient())
     const toast = useToast()
 
     // Refs for scrollable areas
     const problemScrollRef = useRef<HTMLDivElement>(null)
     const consoleScrollRef = useRef<HTMLDivElement>(null)
 
-    useEffect(() => {
-        fetchQuestion()
-    }, [id])
+    const changeLanguage = (next: CodeLanguage) => {
+        // Only replace the editor contents if the user hasn't written anything yet
+        if (code === BOILERPLATE[language]) setCode(BOILERPLATE[next])
+        setLanguage(next)
+    }
 
-    const fetchQuestion = async () => {
-        setLoading(true)
-        // 1. Check if there's an existing question for this skill (simple logic: get latest)
-        const { data } = await supabase
+    useEffect(() => {
+        let cancelled = false
+        // Latest question for this skill, if one exists
+        supabase
             .from('coding_questions')
-            .select('*')
+            .select('id, title, description, difficulty')
             .eq('skill_id', id)
             .order('created_at', { ascending: false })
             .limit(1)
-            .single()
-
-        if (data) {
-            setQuestion(data)
-            setLoading(false)
-        } else {
-            // No question? Should we generate one?
-            // Ask user to generate.
-            setLoading(false)
+            .maybeSingle()
+            .then(({ data }) => {
+                if (cancelled) return
+                if (data) setQuestion(data)
+                setLoading(false)
+            })
+        return () => {
+            cancelled = true
         }
-    }
+    }, [id, supabase])
 
     const generateQuestion = async () => {
         setGenerating(true)
@@ -90,29 +72,16 @@ export default function CodingPage() {
             const { data: skill } = await supabase.from('skills').select('title').eq('id', id).single()
             const topic = skill?.title || "Python Basics"
 
-            const { data: { user } } = await supabase.auth.getUser()
-            if (!user) return
-
-            const response = await fetch('http://localhost:8000/solver/generate-question', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    skill_id: id,
-                    topic: topic,
-                    difficulty: "Medium"
-                })
+            const { question: generated } = await api.solver.generateQuestion({
+                skill_id: id,
+                topic,
+                difficulty: "Medium"
             })
-            const resData = await response.json()
-            if (resData.status === 'success') {
-                setQuestion(resData.question)
-                setResults(null)
-                toast.success("New coding challenge generated!")
-            } else {
-                toast.error("Failed to generate question. Please try again.")
-            }
+            setQuestion(generated)
+            setResults(null)
+            toast.success("New coding challenge generated!")
         } catch (error) {
-            console.error("Failed to generate question", error)
-            toast.error("Failed to generate question. Please ensure the backend is running.")
+            toast.error(errorMessage(error, "Failed to generate question. Please try again."))
         } finally {
             setGenerating(false)
         }
@@ -124,37 +93,21 @@ export default function CodingPage() {
         setResults(null)
 
         try {
-            const { data: { user } } = await supabase.auth.getUser()
-            if (!user) return
-
-            const response = await fetch('http://localhost:8000/solver/submit', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    user_id: user.id,
-                    question_id: question.id,
-                    code: code,
-                    language: language
-                })
+            const { results: testResults } = await api.solver.submit({
+                question_id: question.id,
+                code,
+                language
             })
-
-            const data = await response.json()
-            if (data.results) {
-                setResults(data.results)
-                const passedTests = data.results.filter((r: any) => r.passed).length
-                const totalTests = data.results.length
-                if (passedTests === totalTests) {
-                    toast.success(`All ${totalTests} tests passed! 🎉`)
-                } else {
-                    toast.warning(`${passedTests}/${totalTests} tests passed`)
-                }
+            setResults(testResults)
+            const passedTests = testResults.filter((r) => r.passed).length
+            const totalTests = testResults.length
+            if (passedTests === totalTests) {
+                toast.success(`All ${totalTests} tests passed! 🎉`)
             } else {
-                toast.error("Execution failed without results.")
+                toast.warning(`${passedTests}/${totalTests} tests passed`)
             }
-
         } catch (error) {
-            console.error("Execution error", error)
-            toast.error("Failed to submit code. Please try again.")
+            toast.error(errorMessage(error, "Failed to submit code. Please try again."))
         } finally {
             setRunning(false)
         }
@@ -326,7 +279,7 @@ export default function CodingPage() {
                         <div className="font-mono text-sm text-gray-600">main.{language === 'python' ? 'py' : 'js'}</div>
                         <select
                             value={language}
-                            onChange={(e) => setLanguage(e.target.value)}
+                            onChange={(e) => changeLanguage(e.target.value as CodeLanguage)}
                             className="bg-white text-xs text-gray-700 border border-gray-200 rounded-lg px-3 py-1.5 outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-100 shadow-sm"
                         >
                             <option value="python">Python</option>
@@ -350,6 +303,7 @@ export default function CodingPage() {
                         <CodeEditor
                             value={code}
                             onChange={(val) => setCode(val || "")}
+                            language={language}
                             height="100%"
                         />
                     </div>

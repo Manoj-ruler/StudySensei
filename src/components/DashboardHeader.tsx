@@ -5,10 +5,11 @@ import { createClient } from '@/utils/supabase/client'
 import { useRouter } from 'next/navigation'
 import { GraduationCap, LogOut, Home } from 'lucide-react'
 import Link from 'next/link'
+import type { User } from '@supabase/supabase-js'
 
 export default function DashboardHeader() {
-    const [user, setUser] = useState<any>(null)
-    const [userProfile, setUserProfile] = useState<any>(null)
+    const [user, setUser] = useState<User | null>(null)
+    const [userProfile, setUserProfile] = useState<{ full_name: string | null } | null>(null)
     const router = useRouter()
     const supabase = createClient()
 
@@ -20,7 +21,7 @@ export default function DashboardHeader() {
             if (user) {
                 const { data: profile } = await supabase
                     .from('profiles')
-                    .select('*')
+                    .select('full_name')
                     .eq('id', user.id)
                     .single()
                 setUserProfile(profile)

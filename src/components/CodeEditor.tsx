@@ -5,7 +5,6 @@ interface CodeEditorProps {
     value: string;
     onChange: (value: string | undefined) => void;
     language?: string;
-    theme?: string;
     height?: string;
 }
 
@@ -13,7 +12,6 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
     value,
     onChange,
     language = "python",
-    theme = "vs-light",
     height = "60vh"
 }) => {
     const handleEditorDidMount: OnMount = (editor, monaco) => {
@@ -38,7 +36,7 @@ const CodeEditor: React.FC<CodeEditorProps> = ({
         <div className="border border-gray-200 rounded-lg overflow-hidden bg-white" style={{ height }}>
             <Editor
                 height="100%"
-                defaultLanguage={language}
+                language={language}
                 value={value}
                 onChange={onChange}
                 onMount={handleEditorDidMount}

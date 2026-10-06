@@ -219,16 +219,29 @@ export default function Dashboard() {
     }
 
     const handleDeleteConfirm = async () => {
-        if (!skillToDelete) return
+        if (!skillToDelete || !user) return
 
         const skillTitle = skillToDelete.title
         setDeletingSkillId(skillToDelete.id)
         try {
-            const response = await fetch(`http://localhost:8000/skills/${skillToDelete.id}`, {
-                method: 'DELETE'
-            })
+            // Delete directly through Supabase (same path as creation); related rows
+            // are removed by ON DELETE CASCADE foreign keys. Selecting the deleted row
+            // lets us detect RLS silently blocking the delete (0 rows, no error).
+            const { data, error } = await supabase
+                .from('skills')
+                .delete()
+                .eq('id', skillToDelete.id)
+                .eq('user_id', user.id)
+                .select('id')
 
-            if (response.ok) {
+            if (error) {
+                // 23503 = foreign key violation: related rows exist and don't cascade
+                toast.error(error.code === '23503'
+                    ? 'Failed to delete skill: it still has related documents, chats or quizzes.'
+                    : `Failed to delete skill: ${error.message}`)
+            } else if (!data || data.length === 0) {
+                toast.error('Failed to delete skill: it was not found or you do not have permission.')
+            } else {
                 // Remove from UI state
                 setSkills(skills.filter(s => s.id !== skillToDelete.id))
                 setShowDeleteConfirm(false)
@@ -237,9 +250,6 @@ export default function Dashboard() {
                 // Show success message
                 setDeleteSuccess(skillTitle)
                 setTimeout(() => setDeleteSuccess(null), 3000)
-            } else {
-                const error = await response.json()
-                toast.error(`Failed to delete skill: ${error.detail || 'Unknown error'}`)
             }
         } catch (error) {
             console.error('Delete error:', error)

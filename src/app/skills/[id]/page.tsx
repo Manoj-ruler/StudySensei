@@ -167,7 +167,8 @@ export default function SkillPage() {
     useEffect(() => {
         const message = searchParams.get('message')
         if (message) {
-            setInput(decodeURIComponent(message))
+            // searchParams values are already decoded; decoding again throws on a literal '%'
+            setInput(message)
             // Clear the URL parameter after setting
             router.replace(`/skills/${id}`)
         }

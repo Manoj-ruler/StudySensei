@@ -19,8 +19,6 @@ export type Difficulty = 'Easy' | 'Medium' | 'Hard'
 const MIN_TEST_CASES = 3
 const MAX_TEST_CASES = 10
 const MAX_CASE_CHARACTERS = 2000
-/** Generation costs an LLM call and several sandbox runs. */
-const MAX_GENERATIONS_PER_MINUTE = 3
 
 const generatedChallengeSchema = z.object({
     title: z.string().describe('Short problem title'),
@@ -90,17 +88,6 @@ export async function generateChallenge(
     }
 
     const admin = adminClient()
-
-    const { data: ownSkills } = await supabase.from('skills').select('id')
-    const since = new Date(Date.now() - 60_000).toISOString()
-    const { count: recent } = await admin
-        .from('coding_questions')
-        .select('id', { count: 'exact', head: true })
-        .in('skill_id', (ownSkills ?? []).map((row) => row.id))
-        .gte('created_at', since)
-    if ((recent ?? 0) >= MAX_GENERATIONS_PER_MINUTE) {
-        throw new CodingError('You are generating challenges too quickly. Wait a minute and try again.', 429)
-    }
 
     const material = await sampleStudyMaterial(supabase, skill.id, { maxExcerpts: 4, maxCharacters: 3500 })
 

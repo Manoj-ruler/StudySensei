@@ -19,9 +19,6 @@ export class CodingError extends Error {
     }
 }
 
-/** Each submission occupies shared sandbox capacity; this caps one learner's share. */
-const MAX_SUBMISSIONS_PER_MINUTE = 8
-
 /**
  * Evaluates a submission against all test cases of a question, including the
  * hidden ones, and records the outcome.
@@ -44,16 +41,6 @@ export async function evaluateSubmission(
     if (!question) throw new CodingError('Challenge not found.', 404)
 
     const admin = adminClient()
-
-    const since = new Date(Date.now() - 60_000).toISOString()
-    const { count: recent } = await admin
-        .from('code_submissions')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', user.id)
-        .gte('created_at', since)
-    if ((recent ?? 0) >= MAX_SUBMISSIONS_PER_MINUTE) {
-        throw new CodingError('You are submitting too quickly. Wait a minute and try again.', 429)
-    }
 
     const { data: rows, error: casesError } = await admin
         .from('test_cases')

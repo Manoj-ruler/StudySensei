@@ -285,7 +285,7 @@ export default function CodingPage() {
                                             margin: 1rem 0;
                                         }
                                     `}</style>
-                                    <ReactMarkdown>{question.description}</ReactMarkdown>
+                                    <ReactMarkdown disallowedElements={['img']}>{question.description}</ReactMarkdown>
                                 </div>
                             </div>
                         </div>

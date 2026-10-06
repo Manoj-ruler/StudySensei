@@ -2,6 +2,7 @@ import { after } from 'next/server'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { withUser } from '@/server/auth/require-user'
+import { rateLimit } from '@/server/security/rate-limit'
 import { apiError } from '@/server/http/responses'
 import { ragConfig } from '@/server/ai/config'
 import { documentKind, looksLikePdf } from '@/server/rag/extract'
@@ -19,6 +20,9 @@ function safeFilename(name: string) {
 }
 
 export const POST = withUser(async (request, { user, supabase }) => {
+    const limited = await rateLimit(supabase, 'document_upload')
+    if (limited) return limited
+
     const limitMb = ragConfig.maxFileBytes / (1024 * 1024)
 
     // A body over the server's request size limit cannot be parsed at all.

@@ -407,6 +407,7 @@ export default function Dashboard() {
                                             required
                                             className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-all placeholder:text-gray-400 text-sm"
                                             placeholder="e.g. Quantum Physics"
+                                            maxLength={200}
                                             value={newSkillTitle}
                                             onChange={(e) => setNewSkillTitle(e.target.value)}
                                         />
@@ -416,6 +417,7 @@ export default function Dashboard() {
                                         <textarea
                                             className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-all placeholder:text-gray-400 resize-none text-sm"
                                             placeholder="What is your objective?"
+                                            maxLength={2000}
                                             rows={3}
                                             value={newSkillDesc}
                                             onChange={(e) => setNewSkillDesc(e.target.value)}

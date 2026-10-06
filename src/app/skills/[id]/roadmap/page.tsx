@@ -362,6 +362,7 @@ export default function RoadmapPage() {
                                                     {section.content.length > 0 && (
                                                         <div className="mt-3 text-gray-700 prose max-w-none">
                                                             <ReactMarkdown
+                                                                disallowedElements={['img']}
                                                                 components={{
                                                                     p: ({ node: _node, ...props }) => <p className="mb-3 leading-relaxed text-base" {...props} />,
                                                                     strong: ({ node: _node, ...props }) => <strong className="font-semibold text-gray-900" {...props} />,

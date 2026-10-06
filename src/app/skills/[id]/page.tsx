@@ -496,7 +496,21 @@ _${message}_` : message,
                                                 <div className="prose prose-sm max-w-none">
                                                     <ReactMarkdown
                                                         remarkPlugins={[remarkGfm]}
+                                                        disallowedElements={['img']}
                                                         components={{
+                                                            a({ node: _node, children, ...props }) {
+
+                                                                return (
+
+                                                                    <a {...props} target="_blank" rel="noopener noreferrer nofollow">
+
+                                                                        {children}
+
+                                                                    </a>
+
+                                                                )
+
+                                                            },
                                                             code({ node: _node, className, children, ...props }) {
                                                                 return (
                                                                     <code className={`${className ?? ''} bg-gray-800 text-gray-100 px-2 py-1 rounded text-sm`} {...props}>
@@ -604,6 +618,7 @@ _${message}_` : message,
                                     value={input}
                                     onChange={handleInputChange}
                                     placeholder="Type your message..."
+                                    maxLength={4000}
                                     className="w-full bg-transparent border-none py-2.5 px-3 text-gray-800 placeholder-gray-400 focus:ring-0 text-sm focus:outline-none"
                                     disabled={sending}
                                     autoFocus

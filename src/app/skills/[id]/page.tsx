@@ -14,7 +14,7 @@ import { motion } from 'framer-motion'
 import { useToast } from '@/components/ToastProvider'
 import { api, errorMessage } from '@/lib/api/client'
 import { MENTOR_MODES, isMentorMode, type MentorMode, type MessageSource } from '@/lib/api/types'
-import { DOCUMENT_ACCEPT, documentState, type SkillDocument } from '@/lib/documents'
+import { DOCUMENT_ACCEPT, documentState, isDocumentInProgress, type SkillDocument } from '@/lib/documents'
 
 interface QuizQuestion {
     question: string
@@ -173,7 +173,7 @@ export default function SkillPage() {
     const fetchDocuments = useCallback(async () => {
         const { data } = await supabase
             .from('documents')
-            .select('id, filename, status, processed, created_at')
+            .select('id, filename, status, processed, error_message, created_at')
             .eq('skill_id', id)
             .order('created_at', { ascending: false })
 
@@ -188,11 +188,11 @@ export default function SkillPage() {
         messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
     }, [messages])
 
-    // While any document is still being processed, refresh the list periodically.
-    const hasUnfinishedDocuments = documents.some((doc) => documentState(doc) !== 'ready')
+    // While a document is being processed, refresh the list until it finishes.
+    const hasUnfinishedDocuments = documents.some(isDocumentInProgress)
     useEffect(() => {
         if (!hasUnfinishedDocuments) return
-        const interval = setInterval(fetchDocuments, 30000)
+        const interval = setInterval(fetchDocuments, 4000)
         return () => clearInterval(interval)
     }, [hasUnfinishedDocuments, fetchDocuments])
 
@@ -274,12 +274,21 @@ export default function SkillPage() {
         try {
             await api.documents.upload(file, id)
             await fetchDocuments()
-            toast.success('Document uploaded successfully!')
+            toast.success('Document uploaded. Processing it now...')
         } catch (error) {
             toast.error(errorMessage(error, 'Failed to upload document'))
         } finally {
             setUploading(false)
             if (fileInputRef.current) fileInputRef.current.value = ''
+        }
+    }
+
+    const processDocument = async (docId: string) => {
+        try {
+            await api.documents.process(docId)
+            await fetchDocuments()
+        } catch (error) {
+            toast.error(errorMessage(error, 'Failed to process document'))
         }
     }
 
@@ -342,9 +351,20 @@ export default function SkillPage() {
                                                     Processing
                                                 </span>
                                             ) : (
-                                                <span className="text-xs text-yellow-600 flex items-center">
-                                                    <AlertCircle className="h-3 w-3 mr-1" />
-                                                    Pending
+                                                <span className="text-xs flex items-center gap-2">
+                                                    <span
+                                                        className={`flex items-center ${documentState(doc) === 'failed' ? 'text-red-600' : 'text-yellow-600'}`}
+                                                        title={doc.error_message ?? undefined}
+                                                    >
+                                                        <AlertCircle className="h-3 w-3 mr-1" />
+                                                        {documentState(doc) === 'failed' ? 'Failed' : 'Not processed'}
+                                                    </span>
+                                                    <button
+                                                        onClick={() => processDocument(doc.id)}
+                                                        className="text-purple-600 hover:text-purple-800 font-medium underline"
+                                                    >
+                                                        {documentState(doc) === 'failed' ? 'Retry' : 'Process'}
+                                                    </button>
                                                 </span>
                                             )}
                                         </div>

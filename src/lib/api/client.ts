@@ -1,4 +1,5 @@
 import type {
+    DocumentSearchResponse,
     DocumentUploadResponse,
     GenerateQuestionRequest,
     GenerateQuestionResponse,
@@ -83,6 +84,13 @@ export const api = {
                 body: formData,
             })
         },
+        /** Starts (or restarts) processing; poll the document status for the outcome. */
+        process: (documentId: string) =>
+            request<{ status: string }>(`/documents/${encodeURIComponent(documentId)}/process`, {
+                method: 'POST',
+            }),
+        search: (skillId: string, query: string, limit?: number) =>
+            postJson<DocumentSearchResponse>('/documents/search', { skill_id: skillId, query, limit }),
         remove: (documentId: string) =>
             request<unknown>(`/documents/${encodeURIComponent(documentId)}`, { method: 'DELETE' }),
     },

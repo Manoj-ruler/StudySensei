@@ -10,7 +10,7 @@ import DashboardHeader from '@/components/DashboardHeader'
 import HomeFooter from '@/components/HomeFooter'
 import { useToast } from '@/components/ToastProvider'
 import { api, errorMessage } from '@/lib/api/client'
-import { DOCUMENT_ACCEPT, documentState, type SkillDocument } from '@/lib/documents'
+import { DOCUMENT_ACCEPT, documentState, isDocumentInProgress, type SkillDocument } from '@/lib/documents'
 
 interface SkillWithRoadmap {
     id: string
@@ -23,6 +23,7 @@ interface DocumentItemProps {
     isSelected: boolean
     onToggle: (id: string) => void
     onDelete: (id: string) => void
+    onProcess: (id: string) => void
 }
 
 interface RoadmapPhase {
@@ -38,7 +39,7 @@ interface RoadmapSection {
 }
 
 // Memoized document item
-const DocumentItem = memo(({ doc, isSelected, onToggle, onDelete }: DocumentItemProps) => (
+const DocumentItem = memo(({ doc, isSelected, onToggle, onDelete, onProcess }: DocumentItemProps) => (
     <div
         className={`p-3 rounded-lg border transition-colors cursor-pointer ${isSelected
             ? 'bg-purple-50 border-purple-300'
@@ -56,10 +57,28 @@ const DocumentItem = memo(({ doc, isSelected, onToggle, onDelete }: DocumentItem
                             <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
                             Ready
                         </span>
-                    ) : (
+                    ) : documentState(doc) === 'processing' ? (
                         <span className="text-yellow-600 flex items-center">
                             <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                             Processing
+                        </span>
+                    ) : (
+                        <span className="flex items-center gap-2">
+                            <span
+                                className={documentState(doc) === 'failed' ? 'text-red-600' : 'text-yellow-600'}
+                                title={doc.error_message ?? undefined}
+                            >
+                                {documentState(doc) === 'failed' ? 'Failed' : 'Not processed'}
+                            </span>
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation()
+                                    onProcess(doc.id)
+                                }}
+                                className="text-purple-600 hover:text-purple-800 font-medium underline"
+                            >
+                                {documentState(doc) === 'failed' ? 'Retry' : 'Process'}
+                            </button>
                         </span>
                     )}
                 </div>
@@ -150,7 +169,7 @@ export default function RoadmapPage() {
 
         const { data: docsData } = await supabase
             .from('documents')
-            .select('id, filename, status, processed, created_at')
+            .select('id, filename, status, processed, error_message, created_at')
             .eq('skill_id', id)
             .order('created_at', { ascending: false })
 
@@ -162,11 +181,11 @@ export default function RoadmapPage() {
         fetchData()
     }, [fetchData])
 
-    // While any document is still being processed, refresh the list periodically.
-    const hasUnfinishedDocuments = documents.some((doc) => documentState(doc) !== 'ready')
+    // While a document is being processed, refresh the list until it finishes.
+    const hasUnfinishedDocuments = documents.some(isDocumentInProgress)
     useEffect(() => {
         if (!hasUnfinishedDocuments) return
-        const interval = setInterval(fetchData, 15000)
+        const interval = setInterval(fetchData, 4000)
         return () => clearInterval(interval)
     }, [hasUnfinishedDocuments, fetchData])
 
@@ -192,7 +211,7 @@ export default function RoadmapPage() {
         try {
             await api.documents.upload(file, id)
             await fetchData()
-            toast.success('Document uploaded successfully!')
+            toast.success('Document uploaded. Processing it now...')
         } catch (error) {
             toast.error(errorMessage(error, 'Failed to upload document'))
         } finally {
@@ -212,6 +231,15 @@ export default function RoadmapPage() {
             toast.error(errorMessage(error, 'Failed to delete document'))
         }
     }, [toast])
+
+    const handleProcessDocument = useCallback(async (docId: string) => {
+        try {
+            await api.documents.process(docId)
+            await fetchData()
+        } catch (error) {
+            toast.error(errorMessage(error, 'Failed to process document'))
+        }
+    }, [fetchData, toast])
 
     const toggleDocSelection = useCallback((docId: string) => {
         setSelectedDocs(prev =>
@@ -491,6 +519,7 @@ export default function RoadmapPage() {
                                             isSelected={selectedDocs.includes(doc.id)}
                                             onToggle={toggleDocSelection}
                                             onDelete={handleDeleteDocument}
+                                            onProcess={handleProcessDocument}
                                         />
                                     ))
                                 )}

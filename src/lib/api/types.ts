@@ -162,6 +162,11 @@ export interface TestResult {
 }
 
 export interface SubmitCodeResponse {
+    /** 'error' means the code never produced gradable output (for example a syntax error). */
+    status: 'passed' | 'failed' | 'error'
+    passed_tests: number
+    total_tests: number
+    /** Visible cases first. Hidden cases carry no input, expected or actual output. */
     results: TestResult[]
 }
 

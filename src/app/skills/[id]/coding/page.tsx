@@ -13,11 +13,36 @@ import { useToast } from '@/components/ToastProvider'
 import { api, errorMessage } from '@/lib/api/client'
 import type { CodeLanguage, CodingQuestion, TestResult } from '@/lib/api/types'
 
-// Starter code per language
+// Starter code per language. Every challenge is solved the same way: read all of
+// standard input, print the answer to standard output.
 const BOILERPLATE: Record<CodeLanguage, string> = {
-    python: `# Write your Python code here\n\ndef solution(input_str):\n    # Your code\n    return input_str\n\n# Do not modify the input reading logic if provided\nimport sys\n# input_str = sys.stdin.read()\n# print(solution(input_str))\n`,
-    javascript: `// Write your JavaScript code here\n\nfunction solution(inputStr) {\n    // Your code\n    return inputStr;\n}\n\n// Do not modify standard input reading\nconst fs = require('fs');\nconst input = fs.readFileSync(0, 'utf-8');\n// console.log(solution(input));\n`
+    python: [
+        'import sys',
+        '',
+        '',
+        'def solve(data: str) -> str:',
+        '    # `data` is everything from standard input. Return what should be printed.',
+        '    lines = data.splitlines()',
+        '    return ""',
+        '',
+        '',
+        'print(solve(sys.stdin.read()))',
+        '',
+    ].join('\n'),
+    javascript: [
+        'function solve(data) {',
+        '    // `data` is everything from standard input. Return what should be printed.',
+        '    const lines = data.split("\\n");',
+        '    return "";',
+        '}',
+        '',
+        'console.log(solve(require("fs").readFileSync(0, "utf8")));',
+        '',
+    ].join('\n'),
 }
+
+const DIFFICULTIES = ['Easy', 'Medium', 'Hard'] as const
+type Difficulty = (typeof DIFFICULTIES)[number]
 
 export default function CodingPage() {
     const params = useParams()
@@ -31,6 +56,7 @@ export default function CodingPage() {
     const [running, setRunning] = useState(false)
     const [results, setResults] = useState<TestResult[] | null>(null)
     const [generating, setGenerating] = useState(false)
+    const [difficulty, setDifficulty] = useState<Difficulty>('Easy')
 
     const [supabase] = useState(() => createClient())
     const toast = useToast()
@@ -75,7 +101,7 @@ export default function CodingPage() {
             const { question: generated } = await api.solver.generateQuestion({
                 skill_id: id,
                 topic,
-                difficulty: "Medium"
+                difficulty
             })
             setQuestion(generated)
             setResults(null)
@@ -93,14 +119,16 @@ export default function CodingPage() {
         setResults(null)
 
         try {
-            const { results: testResults } = await api.solver.submit({
+            const {
+                results: testResults,
+                passed_tests: passedTests,
+                total_tests: totalTests,
+            } = await api.solver.submit({
                 question_id: question.id,
                 code,
                 language
             })
             setResults(testResults)
-            const passedTests = testResults.filter((r) => r.passed).length
-            const totalTests = testResults.length
             if (passedTests === totalTests) {
                 toast.success(`All ${totalTests} tests passed! 🎉`)
             } else {
@@ -138,10 +166,22 @@ export default function CodingPage() {
                         Back
                     </Link>
                     <div className="flex items-center space-x-2">
+                        <select
+                            value={difficulty}
+                            onChange={(e) => setDifficulty(e.target.value as Difficulty)}
+                            disabled={generating}
+                            aria-label="Difficulty of the next challenge"
+                            className="bg-white text-xs text-gray-700 border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-purple-400 shadow-sm"
+                        >
+                            {DIFFICULTIES.map((level) => (
+                                <option key={level} value={level}>{level}</option>
+                            ))}
+                        </select>
                         <button
                             onClick={generateQuestion}
                             disabled={generating}
-                            title="Generate a new random question"
+                            aria-label="Generate a new challenge"
+                            title="Generate a new challenge"
                             className="p-1.5 bg-white hover:bg-gray-50 text-gray-700 rounded-lg transition-colors border border-gray-200 shadow-sm hover:shadow"
                         >
                             <RefreshCw className={`h-4 w-4 ${generating ? 'animate-spin' : ''}`} />
@@ -337,7 +377,9 @@ export default function CodingPage() {
                                                 <div className="flex-1">
                                                     <p className="text-gray-900 font-bold mb-1">Test Case {i + 1}</p>
                                                     {res.error ? (
-                                                        <p className="text-red-600 text-xs">{res.error}</p>
+                                                        <p className="text-red-600 text-xs whitespace-pre-wrap">
+                                                            {res.is_hidden ? `Hidden test: ${res.error}` : res.error}
+                                                        </p>
                                                     ) : (
                                                         <>
                                                             {!res.is_hidden ? (

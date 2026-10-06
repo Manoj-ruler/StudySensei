@@ -142,7 +142,8 @@ export default function QuizPage() {
                     body: JSON.stringify({
                         skill_id: id,
                         user_id: user?.id,
-                        score: score + (selectedOption === questions[currentQuestion].correct_answer ? 1 : 0),
+                        // handleOptionSelect already counted the final answer
+                        score: score,
                         total_questions: questions.length,
                         questions: questionsData
                     })

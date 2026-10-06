@@ -23,7 +23,7 @@ export const POST = withUser(async (request, { supabase }) => {
             skillId: body.data.skill_id,
             k: body.data.limit,
         })
-        const documents = await retriever.invoke(body.data.query)
+        const documents = await retriever.retrieve(body.data.query)
 
         return NextResponse.json({
             results: documents.map((doc) => ({

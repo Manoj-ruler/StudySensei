@@ -8,9 +8,14 @@ export function isMentorMode(value: unknown): value is MentorMode {
     return typeof value === 'string' && (MENTOR_MODES as readonly string[]).includes(value)
 }
 
+/** A document excerpt the mentor cited, numbered as it appears in the answer ([1], [2], ...). */
 export interface MessageSource {
-    title: string
-    content: string
+    index: number
+    chunk_id: string
+    document_id: string
+    filename: string
+    page_number: number | null
+    similarity: number
 }
 
 export interface MentorMessageRequest {
@@ -20,12 +25,12 @@ export interface MentorMessageRequest {
     mode: MentorMode
 }
 
-export interface MentorMessageResponse {
-    response: string
-    chat_id: string
-    sources?: MessageSource[]
-    mode?: MentorMode
-}
+/** Events streamed by POST /api/mentor/message, one JSON object per line. */
+export type MentorStreamEvent =
+    | { type: 'meta'; chat_id: string }
+    | { type: 'delta'; text: string }
+    | { type: 'done'; sources: MessageSource[] }
+    | { type: 'error'; message: string }
 
 export interface DocumentUploadResponse {
     document_id: string

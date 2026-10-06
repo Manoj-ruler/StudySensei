@@ -1,11 +1,12 @@
 import type { SupabaseClient, User } from '@supabase/supabase-js'
 import { createClient } from '@/utils/supabase/server'
 import { apiError } from '@/server/http/responses'
+import type { Database } from '@/server/db/database.types'
 
 export interface AuthContext {
     user: User
     /** Supabase client acting as the signed-in user, so RLS applies. */
-    supabase: SupabaseClient
+    supabase: SupabaseClient<Database>
 }
 
 type AuthedHandler<TRouteContext> = (

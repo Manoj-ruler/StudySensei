@@ -88,7 +88,7 @@ export interface CodingQuestion {
     id: string
     title: string
     description: string
-    difficulty: string
+    difficulty: string | null
 }
 
 export interface GenerateQuestionRequest {

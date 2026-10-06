@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, memo } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/utils/supabase/client'
 import { ChevronLeft, Loader2, Sparkles, Upload, FileText, Trash2, MapPin, MessageCircle, Lightbulb, Target, BookOpen, CheckCircle2 } from 'lucide-react'
@@ -9,17 +9,36 @@ import ReactMarkdown from 'react-markdown'
 import DashboardHeader from '@/components/DashboardHeader'
 import HomeFooter from '@/components/HomeFooter'
 import { useToast } from '@/components/ToastProvider'
+import { api, errorMessage } from '@/lib/api/client'
+import { DOCUMENT_ACCEPT, documentState, type SkillDocument } from '@/lib/documents'
 
-interface Document {
+interface SkillWithRoadmap {
     id: string
-    filename: string
-    processed: boolean
-    status: string
-    created_at: string
+    title: string
+    roadmap: string | null
+}
+
+interface DocumentItemProps {
+    doc: SkillDocument
+    isSelected: boolean
+    onToggle: (id: string) => void
+    onDelete: (id: string) => void
+}
+
+interface RoadmapPhase {
+    title: string
+    topics: string[]
+    items: string[]
+}
+
+interface RoadmapSection {
+    title: string
+    content: string[]
+    phases: RoadmapPhase[]
 }
 
 // Memoized document item
-const DocumentItem = memo(({ doc, isSelected, onToggle, onDelete }: any) => (
+const DocumentItem = memo(({ doc, isSelected, onToggle, onDelete }: DocumentItemProps) => (
     <div
         className={`p-3 rounded-lg border transition-colors cursor-pointer ${isSelected
             ? 'bg-purple-50 border-purple-300'
@@ -32,7 +51,7 @@ const DocumentItem = memo(({ doc, isSelected, onToggle, onDelete }: any) => (
             <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-700 truncate">{doc.filename}</p>
                 <div className="text-xs text-gray-400 flex items-center mt-1">
-                    {doc.status === 'ready' || doc.processed ? (
+                    {documentState(doc) === 'ready' ? (
                         <span className="text-green-600 flex items-center gap-1">
                             <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
                             Ready
@@ -61,19 +80,18 @@ const DocumentItem = memo(({ doc, isSelected, onToggle, onDelete }: any) => (
 DocumentItem.displayName = 'DocumentItem'
 
 // Parse roadmap into structured sections
-function parseRoadmap(markdown: string) {
+function parseRoadmap(markdown: string): RoadmapSection[] {
     const lines = markdown.split('\n')
-    const sections: any[] = []
-    let currentSection: any = null
-    let currentPhase: any = null
+    const sections: RoadmapSection[] = []
+    let currentSection: RoadmapSection | null = null
+    let currentPhase: RoadmapPhase | null = null
 
-    lines.forEach(line => {
+    for (const line of lines) {
         // Main heading (# )
         if (line.startsWith('# ')) {
             if (currentSection) sections.push(currentSection)
             currentSection = {
                 title: line.replace('# ', '').trim(),
-                type: 'main',
                 content: [],
                 phases: []
             }
@@ -100,7 +118,7 @@ function parseRoadmap(markdown: string) {
         else if (line.trim() && currentSection) {
             currentSection.content.push(line.trim())
         }
-    })
+    }
 
     if (currentPhase) currentSection?.phases.push(currentPhase)
     if (currentSection) sections.push(currentSection)
@@ -110,14 +128,13 @@ function parseRoadmap(markdown: string) {
 
 export default function RoadmapPage() {
     const params = useParams()
-    const router = useRouter()
     const id = params.id as string
-    const supabase = createClient()
+    const [supabase] = useState(() => createClient())
 
-    const [skill, setSkill] = useState<any>(null)
+    const [skill, setSkill] = useState<SkillWithRoadmap | null>(null)
     const [loading, setLoading] = useState(true)
     const [generating, setGenerating] = useState(false)
-    const [documents, setDocuments] = useState<Document[]>([])
+    const [documents, setDocuments] = useState<SkillDocument[]>([])
     const [uploading, setUploading] = useState(false)
     const [selectedDocs, setSelectedDocs] = useState<string[]>([])
     const toast = useToast()
@@ -125,7 +142,7 @@ export default function RoadmapPage() {
     const fetchData = useCallback(async () => {
         const { data: skillData } = await supabase
             .from('skills')
-            .select('*')
+            .select('id, title, roadmap')
             .eq('id', id)
             .single()
 
@@ -133,7 +150,7 @@ export default function RoadmapPage() {
 
         const { data: docsData } = await supabase
             .from('documents')
-            .select('*')
+            .select('id, filename, status, processed, created_at')
             .eq('skill_id', id)
             .order('created_at', { ascending: false })
 
@@ -145,79 +162,42 @@ export default function RoadmapPage() {
         fetchData()
     }, [fetchData])
 
+    // While any document is still being processed, refresh the list periodically.
+    const hasUnfinishedDocuments = documents.some((doc) => documentState(doc) !== 'ready')
+    useEffect(() => {
+        if (!hasUnfinishedDocuments) return
+        const interval = setInterval(fetchData, 15000)
+        return () => clearInterval(interval)
+    }, [hasUnfinishedDocuments, fetchData])
+
     const handleGenerateRoadmap = async () => {
         setGenerating(true)
         try {
-            console.log('Generating roadmap for skill:', id, 'with selected documents:', selectedDocs)
-
-            const response = await fetch('http://localhost:8000/roadmap/generate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    skill_id: id,
-                    document_ids: selectedDocs
-                })
-            })
-
-            const data = await response.json()
-
-            if (response.ok) {
-                console.log('Roadmap generated successfully')
-                setSkill({ ...skill, roadmap: data.roadmap, roadmap_svg: data.roadmap_svg })
-                toast.success('Roadmap generated successfully!')
-            } else {
-                console.error('Roadmap generation failed:', data)
-                toast.error(`Failed to generate roadmap: ${data.detail || 'Unknown error'}. Please try again.`)
-            }
+            const data = await api.roadmap.generate({ skill_id: id, document_ids: selectedDocs })
+            setSkill((current) => (current ? { ...current, roadmap: data.roadmap } : current))
+            toast.success('Roadmap generated successfully!')
         } catch (error) {
-            console.error('Roadmap generation error:', error)
-            toast.error('Failed to generate roadmap. Please check your connection and try again.')
+            toast.error(errorMessage(error, 'Failed to generate roadmap. Please try again.'))
         } finally {
             setGenerating(false)
         }
     }
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0]
+        const input = e.target
+        const file = input.files?.[0]
         if (!file) return
 
         setUploading(true)
         try {
-            const { data: { user } } = await supabase.auth.getUser()
-            if (!user) return
-
-            const formData = new FormData()
-            formData.append('file', file)
-            formData.append('skill_id', id)
-            formData.append('user_id', user.id)
-
-            const response = await fetch('http://localhost:8000/documents/upload', {
-                method: 'POST',
-                body: formData
-            })
-
-            if (response.ok) {
-                // Immediately fetch to show the new document
-                await fetchData()
-                toast.success('Document uploaded successfully!')
-
-                // Poll for status updates every 3 seconds for up to 30 seconds
-                let pollCount = 0
-                const pollInterval = setInterval(async () => {
-                    pollCount++
-                    await fetchData()
-
-                    // Stop polling after 30 seconds
-                    if (pollCount >= 10) {
-                        clearInterval(pollInterval)
-                    }
-                }, 3000)
-            }
+            await api.documents.upload(file, id)
+            await fetchData()
+            toast.success('Document uploaded successfully!')
         } catch (error) {
-            console.error('Upload error:', error)
-            toast.error('Failed to upload document')
+            toast.error(errorMessage(error, 'Failed to upload document'))
         } finally {
             setUploading(false)
+            input.value = ''
         }
     }
 
@@ -225,15 +205,13 @@ export default function RoadmapPage() {
         if (!confirm('Delete this document?')) return
 
         try {
-            const res = await fetch(`http://localhost:8000/documents/${docId}`, { method: 'DELETE' })
-            if (res.ok) {
-                setDocuments(prev => prev.filter(d => d.id !== docId))
-                setSelectedDocs(prev => prev.filter(id => id !== docId))
-            }
+            await api.documents.remove(docId)
+            setDocuments(prev => prev.filter(d => d.id !== docId))
+            setSelectedDocs(prev => prev.filter(id => id !== docId))
         } catch (error) {
-            console.error(error)
+            toast.error(errorMessage(error, 'Failed to delete document'))
         }
-    }, [])
+    }, [toast])
 
     const toggleDocSelection = useCallback((docId: string) => {
         setSelectedDocs(prev =>
@@ -326,10 +304,10 @@ export default function RoadmapPage() {
                                                         <div className="mt-3 text-gray-700 prose max-w-none">
                                                             <ReactMarkdown
                                                                 components={{
-                                                                    p: ({ node, ...props }) => <p className="mb-3 leading-relaxed text-base" {...props} />,
-                                                                    strong: ({ node, ...props }) => <strong className="font-semibold text-gray-900" {...props} />,
-                                                                    ul: ({ node, ...props }) => <ul className="list-disc list-inside space-y-2 ml-2" {...props} />,
-                                                                    li: ({ node, ...props }) => <li className="leading-relaxed" {...props} />
+                                                                    p: ({ node: _node, ...props }) => <p className="mb-3 leading-relaxed text-base" {...props} />,
+                                                                    strong: ({ node: _node, ...props }) => <strong className="font-semibold text-gray-900" {...props} />,
+                                                                    ul: ({ node: _node, ...props }) => <ul className="list-disc list-inside space-y-2 ml-2" {...props} />,
+                                                                    li: ({ node: _node, ...props }) => <li className="leading-relaxed" {...props} />
                                                                 }}
                                                             >
                                                                 {section.content.join('\n\n')}
@@ -342,8 +320,8 @@ export default function RoadmapPage() {
 
                                         {/* Phases */}
                                         {section.phases
-                                            .filter((phase: any) => phase.items.length > 0 || phase.topics.length > 0) // Hide empty phases
-                                            .map((phase: any, phaseIdx: number) => {
+                                            .filter((phase) => phase.items.length > 0 || phase.topics.length > 0) // Hide empty phases
+                                            .map((phase, phaseIdx) => {
                                                 // Extract phase number from title if it exists (e.g., "Phase 1: Foundation")
                                                 const phaseMatch = phase.title.match(/Phase\s+(\d+)/i)
                                                 const phaseNumber = phaseMatch ? phaseMatch[1] : null
@@ -479,7 +457,7 @@ export default function RoadmapPage() {
                             <label className="block mb-6">
                                 <input
                                     type="file"
-                                    accept=".pdf,.txt,.md"
+                                    accept={DOCUMENT_ACCEPT}
                                     onChange={handleFileUpload}
                                     className="hidden"
                                     disabled={uploading}

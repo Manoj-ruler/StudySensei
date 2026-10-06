@@ -1,10 +1,11 @@
 import { createClient } from '@/utils/supabase/server'
+import { safeRedirectPath } from '@/utils/safe-redirect'
 import { NextResponse } from 'next/server'
 
 export async function GET(request: Request) {
     const { searchParams, origin } = new URL(request.url)
     const code = searchParams.get('code')
-    const next = searchParams.get('next') ?? '/'
+    const next = safeRedirectPath(searchParams.get('next'))
 
     if (code) {
         const supabase = await createClient()
@@ -14,6 +15,5 @@ export async function GET(request: Request) {
         }
     }
 
-    // return the user to an error page with instructions
     return NextResponse.redirect(`${origin}/login?error=auth`)
 }

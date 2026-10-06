@@ -5,14 +5,16 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/utils/supabase/client'
 import {
     Send, Loader2, FileText, Trash2, PaperclipIcon as Paperclip,
-    Bot, User, Command, CheckCircle, XCircle, AlertCircle, BookOpen, Target, Lightbulb, ChevronLeft
+    Bot, User, Command, CheckCircle, XCircle, AlertCircle, Target, ChevronLeft
 } from 'lucide-react'
 import Link from 'next/link'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { motion, AnimatePresence } from 'framer-motion'
-import { GlassPanel } from '@/components/ui/glass-panel'
+import { motion } from 'framer-motion'
 import { useToast } from '@/components/ToastProvider'
+import { api, errorMessage } from '@/lib/api/client'
+import { MENTOR_MODES, isMentorMode, type MentorMode, type MessageSource } from '@/lib/api/types'
+import { DOCUMENT_ACCEPT, documentState, type SkillDocument } from '@/lib/documents'
 
 interface QuizQuestion {
     question: string
@@ -23,36 +25,29 @@ interface QuizQuestion {
 interface Message {
     role: 'user' | 'assistant'
     content: string
-    sources?: { title: string, content: string }[]
-    mode?: string
+    sources?: MessageSource[]
+    mode?: MentorMode
 }
 
-interface Document {
-    id: string
-    filename: string
-    status: string
-    processed?: boolean
+function parseQuiz(content: string): QuizQuestion[] | null {
+    try {
+        const parsed: unknown = JSON.parse(content)
+        const questions = (parsed as { questions?: unknown } | null)?.questions
+        return Array.isArray(questions) ? (questions as QuizQuestion[]) : null
+    } catch {
+        return null
+    }
 }
 
-// Memoized Quiz Renderer Component
-const QuizRenderer = React.memo(({ content, skillId, userId }: { content: string, skillId: string, userId: string }) => {
-    const [quizData, setQuizData] = useState<QuizQuestion[] | null>(null)
-    const [userAnswers, setUserAnswers] = useState<number[]>([])
+// Memoized Quiz Renderer Component.
+// Practice quizzes inside the chat are not saved; scored attempts live on the quiz page.
+const QuizRenderer = React.memo(({ content }: { content: string }) => {
+    const [quizData] = useState<QuizQuestion[] | null>(() => parseQuiz(content))
+    const [userAnswers, setUserAnswers] = useState<number[]>(() =>
+        new Array(quizData?.length ?? 0).fill(-1)
+    )
     const [submitted, setSubmitted] = useState(false)
     const [score, setScore] = useState(0)
-    const supabase = createClient()
-
-    useEffect(() => {
-        try {
-            const parsed = JSON.parse(content)
-            if (parsed.questions && Array.isArray(parsed.questions)) {
-                setQuizData(parsed.questions)
-                setUserAnswers(new Array(parsed.questions.length).fill(-1))
-            }
-        } catch (e) {
-            console.error('Failed to parse quiz:', e)
-        }
-    }, [content])
 
     const handleAnswerSelect = (questionIndex: number, optionIndex: number) => {
         if (submitted) return
@@ -61,7 +56,7 @@ const QuizRenderer = React.memo(({ content, skillId, userId }: { content: string
         setUserAnswers(newAnswers)
     }
 
-    const handleSubmit = async () => {
+    const handleSubmit = () => {
         if (!quizData) return
         let correctCount = 0
         quizData.forEach((q, idx) => {
@@ -69,19 +64,6 @@ const QuizRenderer = React.memo(({ content, skillId, userId }: { content: string
         })
         setScore(correctCount)
         setSubmitted(true)
-
-        // Save quiz result
-        try {
-            await supabase.from('quiz_results').insert({
-                user_id: userId,
-                skill_id: skillId,
-                score: correctCount,
-                total: quizData.length,
-                answers: userAnswers
-            })
-        } catch (error) {
-            console.error('Failed to save quiz result:', error)
-        }
     }
 
     if (!quizData) return null
@@ -157,65 +139,62 @@ QuizRenderer.displayName = 'QuizRenderer'
 const MemoizedQuizRenderer = QuizRenderer
 
 export default function SkillPage() {
-    const { id } = useParams()
-    const supabase = createClient()
+    const params = useParams()
+    const id = params.id as string
+    const [supabase] = useState(() => createClient())
     const router = useRouter()
     const searchParams = useSearchParams()
     const toast = useToast()
 
-    // Handle pre-filled message from URL
-    useEffect(() => {
-        const message = searchParams.get('message')
-        if (message) {
-            // searchParams values are already decoded; decoding again throws on a literal '%'
-            setInput(message)
-            // Clear the URL parameter after setting
-            router.replace(`/skills/${id}`)
-        }
-    }, [searchParams, id, router])
-
     const [messages, setMessages] = useState<Message[]>([])
-    const [input, setInput] = useState('')
+    // The roadmap page links here with ?mode=...&message=... to start a conversation.
+    // searchParams values are already decoded; decoding again throws on a literal '%'.
+    const [input, setInput] = useState(() => searchParams.get('message') ?? '')
     const [sending, setSending] = useState(false)
-    const [mode, setMode] = useState('explain')
+    const [mode, setMode] = useState<MentorMode>(() => {
+        const requested = searchParams.get('mode')
+        return isMentorMode(requested) ? requested : 'explain'
+    })
     const [chatId, setChatId] = useState<string | null>(null)
-    const [documents, setDocuments] = useState<Document[]>([])
+    const [documents, setDocuments] = useState<SkillDocument[]>([])
     const [uploading, setUploading] = useState(false)
     const [showCommands, setShowCommands] = useState(false)
 
     const messagesEndRef = useRef<HTMLDivElement>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
 
+    // The prefill has been read into state; drop it from the URL so a reload starts clean
     useEffect(() => {
-        fetchDocuments()
-    }, [id])
+        if (searchParams.has('message') || searchParams.has('mode')) {
+            router.replace(`/skills/${id}`)
+        }
+    }, [searchParams, id, router])
 
-    const fetchDocuments = async () => {
+    const fetchDocuments = useCallback(async () => {
         const { data } = await supabase
             .from('documents')
-            .select('*')
+            .select('id, filename, status, processed, created_at')
             .eq('skill_id', id)
             .order('created_at', { ascending: false })
 
         if (data) setDocuments(data)
-    }
+    }, [id, supabase])
 
     useEffect(() => {
-        scrollToBottom()
+        fetchDocuments()
+    }, [fetchDocuments])
+
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
     }, [messages])
 
-    // Optimized polling - only poll if there are pending documents
+    // While any document is still being processed, refresh the list periodically.
+    const hasUnfinishedDocuments = documents.some((doc) => documentState(doc) !== 'ready')
     useEffect(() => {
-        const interval = setInterval(() => {
-            const hasPending = documents.some(d => d.status === 'pending' || d.status === 'processing' || (!d.status && !d.processed));
-            if (hasPending) fetchDocuments()
-        }, 30000) // Increased from 10s to 30s to reduce lag
+        if (!hasUnfinishedDocuments) return
+        const interval = setInterval(fetchDocuments, 30000)
         return () => clearInterval(interval)
-    }, [documents])
-
-    const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'auto' }) // Changed from 'smooth' to 'auto' to eliminate lag
-    }
+    }, [hasUnfinishedDocuments, fetchDocuments])
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const value = e.target.value
@@ -257,45 +236,34 @@ export default function SkillPage() {
         }
 
         setMessages(prev => [...prev, { role: 'user', content: userMsg, mode: mode }])
+        setInput('')
         setSending(true)
 
         try {
-            const { data: { user } } = await supabase.auth.getUser()
-            if (!user) return
-
-            const response = await fetch('http://localhost:8000/mentor/message', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    user_id: user.id,
-                    skill_id: id,
-                    chat_id: chatId,
-                    message: userMsg,
-                    mode: mode
-                })
+            const data = await api.mentor.sendMessage({
+                skill_id: id,
+                chat_id: chatId,
+                message: userMsg,
+                mode: mode
             })
 
-            const data = await response.json()
-
-            if (data.response) {
-                if (data.chat_id) {
-                    if (!chatId) setChatId(data.chat_id)
-                }
-                setMessages(prev => [...prev, {
-                    role: 'assistant',
-                    content: data.response,
-                    sources: data.sources,
-                    mode: data.mode
-                }])
-            }
+            if (!chatId) setChatId(data.chat_id)
+            setMessages(prev => [...prev, {
+                role: 'assistant',
+                content: data.response,
+                sources: data.sources,
+                mode: data.mode ?? mode
+            }])
         } catch (error) {
-            console.error('Chat error:', error)
-            setMessages(prev => [...prev, { role: 'assistant', content: "Sorry, I encountered an error connecting to the AI." }])
+            // Shown in the conversation, tagged with the current mode so it is not filtered out
+            setMessages(prev => [...prev, {
+                role: 'assistant',
+                content: errorMessage(error, 'Sorry, I could not get a response. Please try again.'),
+                mode: mode
+            }])
         } finally {
             setSending(false)
         }
-
-        setInput('')
     }
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -304,26 +272,11 @@ export default function SkillPage() {
 
         setUploading(true)
         try {
-            const { data: { user } } = await supabase.auth.getUser()
-            if (!user) return
-
-            const formData = new FormData()
-            formData.append('file', file)
-            formData.append('skill_id', id as string)
-            formData.append('user_id', user.id)
-
-            const response = await fetch('http://localhost:8000/documents/upload', {
-                method: 'POST',
-                body: formData
-            })
-
-            if (response.ok) {
-                fetchDocuments()
-                toast.success('Document uploaded successfully!')
-            }
+            await api.documents.upload(file, id)
+            await fetchDocuments()
+            toast.success('Document uploaded successfully!')
         } catch (error) {
-            console.error('Upload error:', error)
-            toast.error('Failed to upload document')
+            toast.error(errorMessage(error, 'Failed to upload document'))
         } finally {
             setUploading(false)
             if (fileInputRef.current) fileInputRef.current.value = ''
@@ -332,21 +285,11 @@ export default function SkillPage() {
 
     const deleteDocument = async (docId: string) => {
         try {
-            const response = await fetch(`http://localhost:8000/documents/${docId}`, {
-                method: 'DELETE'
-            })
-            if (response.ok) fetchDocuments()
+            await api.documents.remove(docId)
+            await fetchDocuments()
         } catch (error) {
-            console.error('Delete error:', error)
+            toast.error(errorMessage(error, 'Failed to delete document'))
         }
-    }
-
-    const focusInput = () => {
-        setTimeout(() => {
-            const form = document.querySelector('form')
-            const input = form?.querySelector('input')
-            input?.focus()
-        }, 0)
     }
 
     return (
@@ -388,12 +331,12 @@ export default function SkillPage() {
                                     <div className="flex-1 min-w-0">
                                         <p className="text-sm font-medium text-gray-800 truncate">{doc.filename}</p>
                                         <div className="flex items-center mt-1">
-                                            {doc.status === 'processed' || doc.processed ? (
+                                            {documentState(doc) === 'ready' ? (
                                                 <span className="text-xs text-green-600 flex items-center">
                                                     <CheckCircle className="h-3 w-3 mr-1" />
                                                     Ready
                                                 </span>
-                                            ) : doc.status === 'processing' ? (
+                                            ) : documentState(doc) === 'processing' ? (
                                                 <span className="text-xs text-blue-600 flex items-center">
                                                     <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                                                     Processing
@@ -424,7 +367,7 @@ export default function SkillPage() {
                         type="file"
                         onChange={handleFileUpload}
                         className="hidden"
-                        accept=".pdf,.txt,.doc,.docx"
+                        accept={DOCUMENT_ACCEPT}
                     />
                     <button
                         onClick={() => fileInputRef.current?.click()}
@@ -477,15 +420,15 @@ export default function SkillPage() {
                                             </div>
 
                                             {msg.content.startsWith('{') && msg.content.includes('"questions"') ? (
-                                                <MemoizedQuizRenderer content={msg.content} skillId={id as string} userId="" />
+                                                <MemoizedQuizRenderer content={msg.content} />
                                             ) : (
                                                 <div className="prose prose-sm max-w-none">
                                                     <ReactMarkdown
                                                         remarkPlugins={[remarkGfm]}
                                                         components={{
-                                                            code({ node, inline, className, children, ...props }: any) {
+                                                            code({ node: _node, className, children, ...props }) {
                                                                 return (
-                                                                    <code className={`${className} bg-gray-800 text-gray-100 px-2 py-1 rounded text-sm`} {...props}>
+                                                                    <code className={`${className ?? ''} bg-gray-800 text-gray-100 px-2 py-1 rounded text-sm`} {...props}>
                                                                         {children}
                                                                     </code>
                                                                 )
@@ -546,7 +489,7 @@ export default function SkillPage() {
                     <div className="max-w-4xl mx-auto bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg border border-gray-200 p-4">
                         {/* Mode Switcher - Now above input */}
                         <div className="flex gap-2 mb-3 justify-center">
-                            {['explain', 'coach', 'plan'].map(m => (
+                            {MENTOR_MODES.map(m => (
                                 <button
                                     key={m}
                                     onClick={() => setMode(m)}
@@ -604,10 +547,6 @@ export default function SkillPage() {
                                 )}
                             </button>
                         </form>
-
-                        <p className="text-center text-[9px] text-gray-400 mt-2 font-medium tracking-wider">
-                            SECURE CONNECTION • END-TO-END ENCRYPTED
-                        </p>
                     </div>
                 </div>
             </div>

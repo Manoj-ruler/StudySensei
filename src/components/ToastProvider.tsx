@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react'
+import { createContext, useContext, useState, useCallback, useMemo, ReactNode } from 'react'
 import { ToastContainer, Toast } from './ui/toast'
 
 interface ToastContextType {
@@ -42,8 +42,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         addToast('info', message, duration)
     }, [addToast])
 
+    // Stable identity, so components can list `toast` as an effect dependency.
+    const value = useMemo(
+        () => ({ addToast, success, error, warning, info }),
+        [addToast, success, error, warning, info]
+    )
+
     return (
-        <ToastContext.Provider value={{ addToast, success, error, warning, info }}>
+        <ToastContext.Provider value={value}>
             {children}
             <ToastContainer toasts={toasts} onDismiss={removeToast} />
         </ToastContext.Provider>

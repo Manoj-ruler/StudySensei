@@ -7,8 +7,9 @@ import type {
     MentorStreamEvent,
     QuizGenerateRequest,
     QuizGenerateResponse,
+    QuizAnswerRequest,
+    QuizAnswerResponse,
     QuizHistoryResponse,
-    QuizSaveRequest,
     RoadmapGenerateRequest,
     RoadmapGenerateResponse,
     SkillAnalyticsResponse,
@@ -158,7 +159,9 @@ export const api = {
     quiz: {
         generate: (payload: QuizGenerateRequest) =>
             postJson<QuizGenerateResponse>('/quiz/generate', payload),
-        save: (payload: QuizSaveRequest) => postJson<unknown>('/quiz/save', payload),
+        /** Submits one answer for grading on the server. */
+        answer: (payload: QuizAnswerRequest) =>
+            postJson<QuizAnswerResponse>('/quiz/answer', payload),
         history: (skillId: string) =>
             request<QuizHistoryResponse>(`/quiz/history/${encodeURIComponent(skillId)}`),
     },

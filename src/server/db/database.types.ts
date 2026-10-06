@@ -920,6 +920,18 @@ export type Database = {
       }
     }
     Functions: {
+      answer_quiz_question: {
+        Args: { p_answer: number; p_question_id: string }
+        Returns: {
+          correct_answer: number
+          explanation: string
+          is_correct: boolean
+          quiz_completed: boolean
+          score: number
+          total_questions: number
+        }[]
+      }
+      get_quiz_history: { Args: { p_skill_id: string }; Returns: Json }
       get_unread_notification_count: { Args: never; Returns: number }
       match_chunks: {
         Args: {

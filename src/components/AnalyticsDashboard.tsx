@@ -98,13 +98,14 @@ export default function AnalyticsDashboard({ skillId }: AnalyticsProps) {
             totalScore: 0,
         })
         entry.count += 1
-        entry.totalScore += record.score || 0
+        // Scores are compared as percentages: a 4/5 quiz and a 3/3 challenge are not on the same scale.
+        entry.totalScore += record.max_score ? ((record.score ?? 0) / record.max_score) * 100 : 0
     }
 
     const activityTypeData: ActivityTypeDatum[] = Object.values(activityByType).map((item) => ({
         type: item.type === 'quiz' ? 'Quizzes' : item.type === 'code' ? 'Coding' : 'Chat',
         count: item.count,
-        avgScore: item.count > 0 ? (item.totalScore / item.count).toFixed(1) : 0
+        avgScore: item.count > 0 ? `${(item.totalScore / item.count).toFixed(0)}%` : '-'
     }))
 
     return (
@@ -138,7 +139,10 @@ export default function AnalyticsDashboard({ skillId }: AnalyticsProps) {
                             {summary.total_quizzes}
                         </p>
                         <div className="mt-4 h-1 w-full bg-gray-100 rounded-full overflow-hidden">
-                            <div className="h-full bg-gradient-to-r from-purple-500 to-pink-400 w-[70%]" />
+                            <div
+                                className="h-full bg-gradient-to-r from-purple-500 to-pink-400 transition-all duration-500"
+                                style={{ width: `${Math.min((summary.total_quizzes / 10) * 100, 100)}%` }}
+                            />
                         </div>
                     </GlassPanel>
                 </motion.div>
@@ -179,7 +183,10 @@ export default function AnalyticsDashboard({ skillId }: AnalyticsProps) {
                             {summary.code_challenges_solved}
                         </p>
                         <div className="mt-4 h-1 w-full bg-gray-100 rounded-full overflow-hidden">
-                            <div className="h-full bg-gradient-to-r from-purple-500 to-indigo-400 w-[40%]" />
+                            <div
+                                className="h-full bg-gradient-to-r from-purple-500 to-indigo-400 transition-all duration-500"
+                                style={{ width: `${Math.min((summary.code_challenges_solved / 10) * 100, 100)}%` }}
+                            />
                         </div>
                     </GlassPanel>
                 </motion.div>
@@ -260,6 +267,35 @@ export default function AnalyticsDashboard({ skillId }: AnalyticsProps) {
                                     />
                                 </div>
                             </div>
+
+                            {/* Roadmap Progress */}
+                            <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-indigo-50 rounded-lg">
+                                            <TrendingUp className="h-5 w-5 text-indigo-600" />
+                                        </div>
+                                        <span className="text-gray-700 font-medium">Roadmap Tasks Done</span>
+                                    </div>
+                                    <span className="text-2xl font-bold text-gray-800">
+                                        {summary.roadmap_tasks_done}
+                                        <span className="text-base font-medium text-gray-400">/{summary.roadmap_tasks_total}</span>
+                                    </span>
+                                </div>
+                                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                                    <div
+                                        className="h-full bg-gradient-to-r from-indigo-500 to-indigo-400 rounded-full transition-all duration-500"
+                                        style={{ width: `${summary.roadmap_tasks_total ? (summary.roadmap_tasks_done / summary.roadmap_tasks_total) * 100 : 0}%` }}
+                                    />
+                                </div>
+                            </div>
+
+                            <p className="text-sm text-gray-500">
+                                {summary.questions_asked} question{summary.questions_asked === 1 ? '' : 's'} asked to the mentor
+                                {' · '}
+                                {summary.documents_ready} of {summary.documents_total} document{summary.documents_total === 1 ? '' : 's'} ready
+                            </p>
+
 
                             {/* Code Activity */}
                             <div className="space-y-2">

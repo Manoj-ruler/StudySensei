@@ -2,6 +2,7 @@ import { after } from 'next/server'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { withUser } from '@/server/auth/require-user'
+import { rateLimit } from '@/server/security/rate-limit'
 import { apiError } from '@/server/http/responses'
 import { ingestDocument } from '@/server/rag/ingest'
 
@@ -13,6 +14,9 @@ interface RouteContext {
 
 /** (Re)runs ingestion for a document, e.g. after a failure or for files uploaded before the pipeline existed. */
 export const POST = withUser<RouteContext>(async (_request, { supabase }, { params }) => {
+    const limited = await rateLimit(supabase, 'document_process')
+    if (limited) return limited
+
     const id = z.uuid().safeParse((await params).id)
     if (!id.success) return apiError(400, 'BAD_REQUEST', 'Invalid document id.')
 

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { withUser } from '@/server/auth/require-user'
+import { rateLimit } from '@/server/security/rate-limit'
 import { apiError } from '@/server/http/responses'
 import { SkillChunkRetriever } from '@/server/rag/retriever'
 
@@ -12,6 +13,9 @@ const bodySchema = z.object({
 
 /** Semantic search over the caller's documents for one skill. */
 export const POST = withUser(async (request, { supabase }) => {
+    const limited = await rateLimit(supabase, 'document_search')
+    if (limited) return limited
+
     const body = bodySchema.safeParse(await request.json().catch(() => null))
     if (!body.success) {
         return apiError(400, 'BAD_REQUEST', 'A skill and a search query (2-500 characters) are required.')

@@ -191,6 +191,7 @@ export default function LoginForm({ initialError, redirectTo }: LoginFormProps) 
                     required
                     className="block w-full pl-10 pr-4 py-3 border-2 border-purple-200 rounded-xl text-gray-900 placeholder:text-gray-400 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none transition-all"
                     placeholder="Full name"
+                    maxLength={200}
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
                   />

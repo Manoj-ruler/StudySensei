@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { MENTOR_MODES, type MentorStreamEvent } from '@/lib/api/types'
 import { withUser } from '@/server/auth/require-user'
+import { rateLimit } from '@/server/security/rate-limit'
 import { apiError } from '@/server/http/responses'
 import { mentorConfig } from '@/server/ai/config'
 import { MentorError, prepareMentorTurn } from '@/server/mentor/service'
@@ -22,6 +23,9 @@ const bodySchema = z.object({
  *   {"type":"error","message":...}  instead of "done" if generation fails
  */
 export const POST = withUser(async (request, { user, supabase }) => {
+    const limited = await rateLimit(supabase, 'mentor_message')
+    if (limited) return limited
+
     const body = bodySchema.safeParse(await request.json().catch(() => null))
     if (!body.success) {
         return apiError(

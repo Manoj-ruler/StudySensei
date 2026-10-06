@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { withUser } from '@/server/auth/require-user'
+import { rateLimit } from '@/server/security/rate-limit'
 import { apiError, statusCode } from '@/server/http/responses'
 import { CodingError, evaluateSubmission } from '@/server/coding/submit'
 
@@ -17,6 +18,9 @@ const bodySchema = z.object({
 
 /** Runs the submitted code against the challenge's test cases in the sandbox and grades it. */
 export const POST = withUser(async (request, { user, supabase }) => {
+    const limited = await rateLimit(supabase, 'code_submit')
+    if (limited) return limited
+
     const body = bodySchema.safeParse(await request.json().catch(() => null))
     if (!body.success) {
         return apiError(

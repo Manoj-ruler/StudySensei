@@ -931,6 +931,10 @@ export type Database = {
           total_questions: number
         }[]
       }
+      consume_rate_limit: {
+        Args: { p_action: string; p_limit: number; p_window_seconds: number }
+        Returns: boolean
+      }
       get_quiz_history: { Args: { p_skill_id: string }; Returns: Json }
       get_unread_notification_count: { Args: never; Returns: number }
       match_chunks: {

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { withUser } from '@/server/auth/require-user'
+import { rateLimit } from '@/server/security/rate-limit'
 import { apiError } from '@/server/http/responses'
 import { QuizError, generateQuiz } from '@/server/learning/quiz'
 
@@ -12,6 +13,9 @@ const bodySchema = z.object({
 })
 
 export const POST = withUser(async (request, { user, supabase }) => {
+    const limited = await rateLimit(supabase, 'quiz_generate')
+    if (limited) return limited
+
     const body = bodySchema.safeParse(await request.json().catch(() => null))
     if (!body.success) {
         return apiError(400, 'BAD_REQUEST', 'A skill and a question count from 1 to 10 are required.')

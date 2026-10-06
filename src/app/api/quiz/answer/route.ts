@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import type { QuizAnswerResponse } from '@/lib/api/types'
 import { withUser } from '@/server/auth/require-user'
+import { rateLimit } from '@/server/security/rate-limit'
 import { apiError } from '@/server/http/responses'
 
 const bodySchema = z.object({
@@ -14,6 +15,9 @@ const bodySchema = z.object({
  * answer_quiz_question(), which holds the answer key the browser cannot read.
  */
 export const POST = withUser(async (request, { supabase }) => {
+    const limited = await rateLimit(supabase, 'quiz_answer')
+    if (limited) return limited
+
     const body = bodySchema.safeParse(await request.json().catch(() => null))
     if (!body.success) {
         return apiError(400, 'BAD_REQUEST', 'A question and an answer are required.')

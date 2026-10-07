@@ -16,6 +16,14 @@ import type {
     SubmitCodeRequest,
     SubmitCodeResponse,
 } from './types'
+import {
+    DOCUMENT_CONTENT_TYPE,
+    DOCUMENTS_BUCKET,
+    MAX_DOCUMENT_BYTES,
+    documentKind,
+    newStoragePath,
+} from '@/lib/documents'
+import { createClient } from '@/utils/supabase/client'
 
 /**
  * Error thrown for any failed API call. `message` is safe to show to the user.
@@ -133,14 +141,52 @@ export const api = {
             streamNdjson<MentorStreamEvent>('/mentor/message', payload, onEvent),
     },
     documents: {
-        upload: (file: File, skillId: string) => {
-            const formData = new FormData()
-            formData.append('file', file)
-            formData.append('skill_id', skillId)
-            return request<DocumentUploadResponse>('/documents/upload', {
-                method: 'POST',
-                body: formData,
-            })
+        /**
+         * Uploads a file straight to storage (so it never passes through the app
+         * server and its request-size limit), then asks the server to record and
+         * process it. Storage enforces ownership, size and type on its side.
+         */
+        upload: async (file: File, skillId: string) => {
+            const kind = documentKind(file.name)
+            if (!kind) throw new ApiError('Only PDF, TXT and MD files are supported.', 400, 'BAD_REQUEST')
+            if (file.size === 0) throw new ApiError('The file is empty.', 400, 'BAD_REQUEST')
+            if (file.size > MAX_DOCUMENT_BYTES) {
+                throw new ApiError(
+                    `The file is larger than ${MAX_DOCUMENT_BYTES / (1024 * 1024)} MB.`,
+                    400,
+                    'BAD_REQUEST'
+                )
+            }
+
+            const supabase = createClient()
+            const { data: { user } } = await supabase.auth.getUser()
+            if (!user) throw new ApiError('You need to sign in to do that.', 401, 'UNAUTHENTICATED')
+
+            const storagePath = newStoragePath(user.id, skillId, file.name)
+            // Sent as raw bytes with an explicit type: given a File, the storage client
+            // uses the browser's own label for it (e.g. text/markdown), which the
+            // bucket's allowed types would reject.
+            const { error } = await supabase.storage
+                .from(DOCUMENTS_BUCKET)
+                .upload(storagePath, await file.arrayBuffer(), {
+                    contentType: DOCUMENT_CONTENT_TYPE[kind],
+                    upsert: false,
+                })
+            if (error) {
+                throw new ApiError('The file could not be uploaded. Please try again.', 0, 'UPLOAD_FAILED')
+            }
+
+            try {
+                return await postJson<DocumentUploadResponse>('/documents/upload', {
+                    skill_id: skillId,
+                    storage_path: storagePath,
+                    filename: file.name,
+                })
+            } catch (registerError) {
+                // Do not leave an unreferenced file behind.
+                await supabase.storage.from(DOCUMENTS_BUCKET).remove([storagePath])
+                throw registerError
+            }
         },
         /** Starts (or restarts) processing; poll the document status for the outcome. */
         process: (documentId: string) =>

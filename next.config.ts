@@ -53,6 +53,9 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
+  // Self-contained server bundle for container deployments (see Dockerfile).
+  // Vercel ignores this and uses its own output.
+  output: "standalone",
   poweredByHeader: false,
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];

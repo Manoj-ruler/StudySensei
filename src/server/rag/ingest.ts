@@ -1,6 +1,7 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/server/db/database.types'
+import { DOCUMENTS_BUCKET, MAX_DOCUMENT_BYTES } from '@/lib/documents'
 import { ragConfig } from '@/server/ai/config'
 import { chunkPages } from './chunk'
 import { embedChunks } from './embeddings'
@@ -8,7 +9,7 @@ import { DocumentProcessingError, documentKind, extractDocument } from './extrac
 
 type Client = SupabaseClient<Database>
 
-export const DOCUMENTS_BUCKET = 'documents'
+export { DOCUMENTS_BUCKET }
 
 const INSERT_BATCH_SIZE = 100
 
@@ -50,7 +51,7 @@ export async function ingestDocument(supabase: Client, documentId: string): Prom
         if (downloadError || !file) {
             throw new DocumentProcessingError('The stored file could not be downloaded.')
         }
-        if (file.size > ragConfig.maxFileBytes) {
+        if (file.size > MAX_DOCUMENT_BYTES) {
             throw new DocumentProcessingError('The file is too large to process.')
         }
 

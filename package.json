@@ -1,5 +1,5 @@
 {
-  "name": "frontend",
+  "name": "studysensei",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -48,5 +48,8 @@
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^5.0.3"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

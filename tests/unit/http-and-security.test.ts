@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError, api, errorMessage } from '@/lib/api/client'
 import type { MentorStreamEvent } from '@/lib/api/types'
-import { documentState, isDocumentInProgress } from '@/lib/documents'
+import { documentKind, documentState, isDocumentInProgress, newStoragePath, safeFilename } from '@/lib/documents'
 import { isCrossSiteRequest } from '@/server/auth/require-user'
 import type { Database } from '@/server/db/database.types'
 import { statusCode } from '@/server/http/responses'
@@ -98,6 +98,32 @@ describe('small helpers', () => {
         ])
         expect(isDocumentInProgress({ status: 'processing', processed: null })).toBe(true)
         expect(isDocumentInProgress({ status: 'pending', processed: null })).toBe(false)
+    })
+})
+
+describe('upload file names and paths', () => {
+    it('strips characters that are unsafe in a storage key', () => {
+        expect(safeFilename('../../etc/passwd')).toBe('....etcpasswd')
+        expect(safeFilename('My  Notes (v2)?.pdf')).toBe('My Notes v2.pdf')
+        expect(safeFilename('‮gnp.exe')).toBe('gnp.exe')
+        expect(safeFilename('???')).toBe('document')
+        expect(safeFilename('x'.repeat(300) + '.pdf')).toHaveLength(120)
+    })
+
+    it('never lets a file name add path segments', () => {
+        const path = newStoragePath('user-1', 'skill-1', '../../other-user/secret.pdf')
+        expect(path.startsWith('user-1/skill-1/')).toBe(true)
+        expect(path.split('/')).toHaveLength(3)
+    })
+
+    it('gives every upload a distinct path', () => {
+        expect(newStoragePath('u', 's', 'a.pdf')).not.toBe(newStoragePath('u', 's', 'a.pdf'))
+    })
+
+    it('recognises only supported document types', () => {
+        expect(['a.PDF', 'b.md', 'c.txt', 'd.docx', 'e.pdf.exe', 'noext'].map(documentKind)).toEqual([
+            'pdf', 'text', 'text', null, null, null,
+        ])
     })
 })
 

@@ -29,7 +29,6 @@ export const ragConfig = {
     embeddingBatchSize: 50,
     /** Upper bound on chunks per document, to cap cost and processing time. */
     maxChunksPerDocument: 1500,
-    maxFileBytes: 10 * 1024 * 1024,
     /** Default number of chunks retrieved for a query. */
     topK: 6,
     /**

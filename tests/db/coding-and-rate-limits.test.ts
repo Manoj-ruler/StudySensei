@@ -21,6 +21,7 @@ beforeAll(async () => {
       insert into public.code_submissions (user_id, question_id, code, language, status) values ('${USER_A}', '${QUESTION}', 'x', 'python', 'failed');
     `))
     await db.migrate('0006')
+    await db.migrate() // everything after: storage limits
 })
 
 afterAll(() => db.close())
@@ -99,6 +100,24 @@ describe('consume_rate_limit', () => {
         expect(await failure(() => db.asAnon(() => db.one(`select public.consume_rate_limit('code_submit', 3, 60)`)))).toMatch(/permission denied/i)
         expect(await asOwner(`select count(*) from public.rate_limits`)).toMatch(/permission denied/i)
         expect(await asOwner(`delete from public.rate_limits`)).toMatch(/permission denied/i)
+    })
+})
+
+describe('storage limits', () => {
+    it('caps the documents bucket at 10 MB of PDF or plain text', async () => {
+        const bucket = await db.one(`select public, file_size_limit, allowed_mime_types from storage.buckets where id = 'documents'`)
+        expect(bucket).toEqual({
+            public: false,
+            file_size_limit: 10 * 1024 * 1024,
+            allowed_mime_types: ['application/pdf', 'text/plain'],
+        })
+    })
+
+    it('lets a stored file back only one document', async () => {
+        const insert = (id: string) =>
+            `insert into public.documents (id, user_id, skill_id, filename, storage_path, status) values ('${id}', '${USER_A}', '${SKILL_A}', 'a.pdf', '${USER_A}/${SKILL_A}/a.pdf', 'processing')`
+        expect(await asOwner(insert('a0000000-0000-0000-0000-0000000000d1'))).toBeNull()
+        expect(await asOwner(insert('a0000000-0000-0000-0000-0000000000d2'))).toMatch(/documents_storage_path_key/)
     })
 })
 

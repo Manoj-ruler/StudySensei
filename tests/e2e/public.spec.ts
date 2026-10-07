@@ -50,7 +50,7 @@ test('an auth callback cannot be used to redirect to another site', async ({ pag
 test('every API endpoint requires a signed-in user', async ({ request }) => {
     const calls = [
         request.post('/api/mentor/message', { data: {} }),
-        request.post('/api/documents/upload', { multipart: { skill_id: SKILL } }),
+        request.post('/api/documents/upload', { data: {} }),
         request.post('/api/documents/search', { data: {} }),
         request.post(`/api/documents/${SKILL}/process`),
         request.delete(`/api/documents/${SKILL}`),

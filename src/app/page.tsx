@@ -10,7 +10,6 @@ import { motion } from 'framer-motion'
 
 export default function Home() {
   const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(true)
   const router = useRouter()
   const supabase = createClient()
 
@@ -18,7 +17,6 @@ export default function Home() {
     const getUser = async () => {
       const { data: { user } } = await supabase.auth.getUser()
       setUser(user)
-      setLoading(false)
     }
     getUser()
   }, [supabase])
@@ -29,13 +27,8 @@ export default function Home() {
     router.refresh()
   }
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-4 border-purple-600 border-t-transparent"></div>
-      </div>
-    )
-  }
+  // The page renders immediately (and is prerendered with its full content);
+  // once the session is known, the buttons switch to the signed-in versions.
 
   return (
     <div className="relative min-h-screen w-full overflow-hidden bg-white cursor-default">

@@ -1,6 +1,15 @@
 node_modules
 .next
 .git
+.github
 .env
-.env.local
+.env.*
+!env.template
 npm-debug.log
+tests
+test-results
+playwright-report
+supabase/.temp
+*.md
+Dockerfile
+.dockerignore

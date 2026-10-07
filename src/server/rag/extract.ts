@@ -1,6 +1,7 @@
 import { extractText, getDocumentProxy } from 'unpdf'
+import type { DocumentKind } from '@/lib/documents'
 
-export type DocumentKind = 'pdf' | 'text'
+export { documentKind, type DocumentKind } from '@/lib/documents'
 
 export interface ExtractedPage {
     /** 1-based page number; null for formats without pages. */
@@ -19,17 +20,6 @@ export class DocumentProcessingError extends Error {
         super(message)
         this.name = 'DocumentProcessingError'
     }
-}
-
-const EXTENSION_KIND: Record<string, DocumentKind> = {
-    pdf: 'pdf',
-    txt: 'text',
-    md: 'text',
-}
-
-export function documentKind(filename: string): DocumentKind | null {
-    const extension = filename.split('.').pop()?.toLowerCase() ?? ''
-    return EXTENSION_KIND[extension] ?? null
 }
 
 /** PDF files start with "%PDF"; checked so a renamed file is rejected early. */

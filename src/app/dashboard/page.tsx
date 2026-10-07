@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { useRouter } from 'next/navigation'
 import { Plus, BookOpen, ArrowRight, Loader2, GraduationCap, LogOut, Home, Upload, X, Trash2, MessageSquare, Target, Code2, BarChart2 } from 'lucide-react'
@@ -8,11 +8,15 @@ import Link from 'next/link'
 import { motion } from 'framer-motion'
 import HomeFooter from '@/components/HomeFooter'
 import { useToast } from '@/components/ToastProvider'
+import type { User } from '@supabase/supabase-js'
+import { api, errorMessage } from '@/lib/api/client'
+import { DOCUMENT_ACCEPT } from '@/lib/documents'
 
 interface Skill {
     id: string
     title: string
-    description: string
+    description: string | null
+    is_technical: boolean | null
     created_at: string
 }
 
@@ -24,9 +28,10 @@ interface UserProfile {
 export default function Dashboard() {
     const [skills, setSkills] = useState<Skill[]>([])
     const [loading, setLoading] = useState(true)
-    const [user, setUser] = useState<any>(null)
+    const [user, setUser] = useState<User | null>(null)
     const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
     const [isCreating, setIsCreating] = useState(false)
+    const [savingSkill, setSavingSkill] = useState(false)
     const [newSkillTitle, setNewSkillTitle] = useState('')
     const [newSkillDesc, setNewSkillDesc] = useState('')
     const [skillCategory, setSkillCategory] = useState<string>('technical')
@@ -60,6 +65,18 @@ export default function Dashboard() {
         { id: 'other', label: 'Other', emoji: '📚' },
     ]
 
+    const fetchSkills = useCallback(async (userId: string) => {
+        const { data, error } = await supabase
+            .from('skills')
+            .select('id, title, description, is_technical, created_at')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false })
+
+        if (error) toast.error('Could not load your skills. Please refresh the page.')
+        if (data) setSkills(data)
+        setLoading(false)
+    }, [supabase, toast])
+
     useEffect(() => {
         const getUser = async () => {
             const { data: { user } } = await supabase.auth.getUser()
@@ -81,7 +98,7 @@ export default function Dashboard() {
             }
         }
         getUser()
-    }, [router, supabase])
+    }, [router, supabase, fetchSkills])
 
     // Prevent body scroll when modal is open
     useEffect(() => {
@@ -95,21 +112,11 @@ export default function Dashboard() {
         }
     }, [isCreating])
 
-    const fetchSkills = async (userId: string) => {
-        const { data, error } = await supabase
-            .from('skills')
-            .select('*')
-            .eq('user_id', userId)
-            .order('created_at', { ascending: false })
-
-        if (data) setSkills(data)
-        setLoading(false)
-    }
-
     const handleCreateSkill = async (e: React.FormEvent) => {
         e.preventDefault()
-        if (!user) return
+        if (!user || savingSkill) return
 
+        setSavingSkill(true)
         const { data, error } = await supabase
             .from('skills')
             .insert([
@@ -121,7 +128,13 @@ export default function Dashboard() {
                     is_technical: skillCategory === 'technical'
                 }
             ])
-            .select()
+            .select('id, title, description, is_technical, created_at')
+        setSavingSkill(false)
+
+        if (error) {
+            toast.error(`Could not create the skill: ${error.message}`)
+            return
+        }
 
         if (data) {
             setSkills([data[0], ...skills])
@@ -143,28 +156,16 @@ export default function Dashboard() {
 
         try {
             for (const file of Array.from(files)) {
-                const formData = new FormData()
-                formData.append('file', file)
-                formData.append('skill_id', createdSkillId)
-                formData.append('user_id', user!.id)
-
-                const response = await fetch('http://localhost:8000/documents/upload', {
-                    method: 'POST',
-                    body: formData
-                })
-
-                if (response.ok) {
-                    const data = await response.json()
-                    uploadedDocIds.push(data.document_id)
+                try {
+                    const { document_id } = await api.documents.upload(file, createdSkillId)
+                    uploadedDocIds.push(document_id)
+                } catch (error) {
+                    toast.error(`${file.name}: ${errorMessage(error, 'upload failed')}`)
                 }
             }
 
-            // Generate roadmap with document context
+            // Generate roadmap with whatever uploaded successfully
             await generateRoadmap(uploadedDocIds)
-        } catch (error) {
-            console.error('Upload error:', error)
-            // Generate roadmap anyway
-            await generateRoadmap([])
         } finally {
             setUploadingDocs(false)
         }
@@ -175,36 +176,16 @@ export default function Dashboard() {
 
         setGeneratingRoadmap(true)
         try {
-            console.log('Generating roadmap for skill:', createdSkillId, 'with documents:', documentIds)
-
-            const response = await fetch('http://localhost:8000/roadmap/generate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    skill_id: createdSkillId,
-                    document_ids: documentIds
-                })
-            })
-
-            const data = await response.json()
-
-            if (response.ok) {
-                console.log('Roadmap generated successfully')
-                toast.success('Roadmap generated successfully!')
-                // Navigate to roadmap page
-                router.push(`/skills/${createdSkillId}/roadmap`)
-            } else {
-                console.error('Roadmap generation failed:', data)
-                toast.error(`Failed to generate roadmap: ${data.detail || 'Unknown error'}`)
-                // Navigate anyway so user can try again from roadmap page
-                router.push(`/skills/${createdSkillId}/roadmap`)
-            }
+            await api.roadmap.generate({ skill_id: createdSkillId, document_ids: documentIds })
+            toast.success('Roadmap generated successfully!')
         } catch (error) {
-            console.error('Roadmap generation error:', error)
-            toast.error('Failed to generate roadmap. You can try generating it from the roadmap page.')
-            // Navigate anyway so user can try again from roadmap page
-            router.push(`/skills/${createdSkillId}/roadmap`)
+            toast.error(
+                `${errorMessage(error, 'Failed to generate roadmap.')} You can try again from the roadmap page.`,
+                8000
+            )
         } finally {
+            // Navigate either way so the user can retry from the roadmap page
+            router.push(`/skills/${createdSkillId}/roadmap`)
             setGeneratingRoadmap(false)
             setShowDocumentPrompt(false)
             setCreatedSkillId(null)
@@ -219,16 +200,29 @@ export default function Dashboard() {
     }
 
     const handleDeleteConfirm = async () => {
-        if (!skillToDelete) return
+        if (!skillToDelete || !user) return
 
         const skillTitle = skillToDelete.title
         setDeletingSkillId(skillToDelete.id)
         try {
-            const response = await fetch(`http://localhost:8000/skills/${skillToDelete.id}`, {
-                method: 'DELETE'
-            })
+            // Delete directly through Supabase (same path as creation); related rows
+            // are removed by ON DELETE CASCADE foreign keys. Selecting the deleted row
+            // lets us detect RLS silently blocking the delete (0 rows, no error).
+            const { data, error } = await supabase
+                .from('skills')
+                .delete()
+                .eq('id', skillToDelete.id)
+                .eq('user_id', user.id)
+                .select('id')
 
-            if (response.ok) {
+            if (error) {
+                // 23503 = foreign key violation: related rows exist and don't cascade
+                toast.error(error.code === '23503'
+                    ? 'Failed to delete skill: it still has related documents, chats or quizzes.'
+                    : `Failed to delete skill: ${error.message}`)
+            } else if (!data || data.length === 0) {
+                toast.error('Failed to delete skill: it was not found or you do not have permission.')
+            } else {
                 // Remove from UI state
                 setSkills(skills.filter(s => s.id !== skillToDelete.id))
                 setShowDeleteConfirm(false)
@@ -237,9 +231,6 @@ export default function Dashboard() {
                 // Show success message
                 setDeleteSuccess(skillTitle)
                 setTimeout(() => setDeleteSuccess(null), 3000)
-            } else {
-                const error = await response.json()
-                toast.error(`Failed to delete skill: ${error.detail || 'Unknown error'}`)
             }
         } catch (error) {
             console.error('Delete error:', error)
@@ -416,6 +407,7 @@ export default function Dashboard() {
                                             required
                                             className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-all placeholder:text-gray-400 text-sm"
                                             placeholder="e.g. Quantum Physics"
+                                            maxLength={200}
                                             value={newSkillTitle}
                                             onChange={(e) => setNewSkillTitle(e.target.value)}
                                         />
@@ -425,6 +417,7 @@ export default function Dashboard() {
                                         <textarea
                                             className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-gray-900 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-all placeholder:text-gray-400 resize-none text-sm"
                                             placeholder="What is your objective?"
+                                            maxLength={2000}
                                             rows={3}
                                             value={newSkillDesc}
                                             onChange={(e) => setNewSkillDesc(e.target.value)}
@@ -466,7 +459,8 @@ export default function Dashboard() {
                                         </button>
                                         <button
                                             type="submit"
-                                            className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 px-6 py-2 rounded-xl font-bold text-white shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all text-sm"
+                                            disabled={savingSkill}
+                                            className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 px-6 py-2 rounded-xl font-bold text-white shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all text-sm disabled:opacity-50"
                                         >
                                             Create Path
                                         </button>
@@ -494,6 +488,7 @@ export default function Dashboard() {
                                     disabled={deletingSkillId === skill.id}
                                     className="absolute top-3 right-3 p-2 rounded-lg bg-white border border-gray-200 hover:bg-red-50 hover:border-red-300 transition-all duration-200 z-10 shadow-sm"
                                     title="Delete skill"
+                                    aria-label={`Delete skill ${skill.title}`}
                                 >
                                     {deletingSkillId === skill.id ? (
                                         <Loader2 className="h-4 w-4 text-red-500 animate-spin" />
@@ -542,7 +537,7 @@ export default function Dashboard() {
                                             Quizzes
                                         </button>
                                     </Link>
-                                    {(skill as any).is_technical && (
+                                    {skill.is_technical && (
                                         <Link href={`/skills/${skill.id}/coding`}>
                                             <button className="w-full px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition-all duration-200 flex items-center justify-center gap-2 text-sm font-medium border border-indigo-200 hover:border-indigo-300">
                                                 <Code2 className="h-4 w-4" />
@@ -588,9 +583,12 @@ export default function Dashboard() {
                                 <h2 className="text-xl font-bold text-gray-900">Upload Learning Materials?</h2>
                                 <button
                                     onClick={() => {
+                                        // Dismiss without generating; the roadmap page offers it later
                                         setShowDocumentPrompt(false)
-                                        generateRoadmap([])
+                                        setCreatedSkillId(null)
                                     }}
+                                    disabled={generatingRoadmap || uploadingDocs}
+                                    aria-label="Close"
                                     className="p-1 hover:bg-gray-100 rounded-lg transition-colors"
                                 >
                                     <X className="h-5 w-5 text-gray-500" />
@@ -618,7 +616,7 @@ export default function Dashboard() {
                                         type="file"
                                         ref={fileInputRef}
                                         onChange={handleFileUpload}
-                                        accept=".pdf,.txt,.md"
+                                        accept={DOCUMENT_ACCEPT}
                                         multiple
                                         className="hidden"
                                     />
@@ -727,7 +725,7 @@ export default function Dashboard() {
                         </div>
                         <div>
                             <p className="font-semibold">Skill Deleted Successfully</p>
-                            <p className="text-sm text-green-100">"{deleteSuccess}" has been removed</p>
+                            <p className="text-sm text-green-100">&quot;{deleteSuccess}&quot; has been removed</p>
                         </div>
                     </motion.div>
                 )

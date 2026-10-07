@@ -2,27 +2,44 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-    LineChart, Line, AreaChart, Area
+    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
 import { Loader2, TrendingUp, Award, Code, Activity } from 'lucide-react';
-import { createClient } from '@/utils/supabase/client';
 import { GlassPanel } from '@/components/ui/glass-panel';
 import { motion } from 'framer-motion';
+import { api, errorMessage } from '@/lib/api/client';
+import type { SkillAnalyticsResponse } from '@/lib/api/types';
 
 interface AnalyticsProps {
     skillId: string;
 }
 
-const CustomTooltip = ({ active, payload, label }: any) => {
+interface ActivityTypeDatum {
+    type: string
+    count: number
+    avgScore: string | number
+}
+
+interface BarTooltipProps {
+    active?: boolean
+    label?: string
+    payload?: { value: number; payload: ActivityTypeDatum }[]
+}
+
+const CustomBarTooltip = ({ active, payload, label }: BarTooltipProps) => {
     if (active && payload && payload.length) {
         return (
             <GlassPanel className="p-4 !rounded-lg border-purple-200 shadow-xl bg-white/90">
-                <p className="text-gray-800 font-medium text-sm mb-1">{label}</p>
-                <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-purple-500" />
-                    <p className="text-gray-500 text-xs">
-                        {payload[0].name}: <span className="text-gray-900 font-bold">{payload[0].value}</span>
+                <p className="text-gray-800 font-medium text-sm mb-2">{label}</p>
+                <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-purple-500" />
+                        <p className="text-gray-600 text-xs">
+                            Count: <span className="text-gray-900 font-bold">{payload[0].value}</span>
+                        </p>
+                    </div>
+                    <p className="text-gray-500 text-xs ml-4">
+                        Avg Score: <span className="text-gray-900 font-semibold">{payload[0].payload.avgScore}</span>
                     </p>
                 </div>
             </GlassPanel>
@@ -32,28 +49,26 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 export default function AnalyticsDashboard({ skillId }: AnalyticsProps) {
-    const [data, setData] = useState<any>(null)
+    const [data, setData] = useState<SkillAnalyticsResponse | null>(null)
     const [loading, setLoading] = useState(true)
-    const supabase = createClient()
+    const [error, setError] = useState<string | null>(null)
 
     useEffect(() => {
-        fetchAnalytics()
-    }, [skillId])
-
-    const fetchAnalytics = async () => {
-        try {
-            const { data: { user } } = await supabase.auth.getUser()
-            if (!user) return
-
-            const response = await fetch(`http://localhost:8000/analytics/skill/${skillId}?user_id=${user.id}`)
-            const resData = await response.json()
-            setData(resData)
-        } catch (error) {
-            console.error("Failed to fetch analytics", error)
-        } finally {
-            setLoading(false)
+        let cancelled = false
+        api.analytics.skill(skillId)
+            .then((result) => {
+                if (!cancelled) setData(result)
+            })
+            .catch((err: unknown) => {
+                if (!cancelled) setError(errorMessage(err, 'Could not load analytics.'))
+            })
+            .finally(() => {
+                if (!cancelled) setLoading(false)
+            })
+        return () => {
+            cancelled = true
         }
-    }
+    }, [skillId])
 
     if (loading) {
         return (
@@ -68,50 +83,30 @@ export default function AnalyticsDashboard({ skillId }: AnalyticsProps) {
 
     if (!data) return (
         <GlassPanel className="p-8 text-center text-gray-500">
-            No data available for this timeline.
+            {error ?? 'No data available for this timeline.'}
         </GlassPanel>
     )
 
     const { summary, history } = data
 
     // Group activities by type
-    const activityByType = history.reduce((acc: any, h: any) => {
-        const type = h.activity_type
-        if (!acc[type]) {
-            acc[type] = { type, count: 0, totalScore: 0 }
-        }
-        acc[type].count += 1
-        acc[type].totalScore += h.score || 0
-        return acc
-    }, {})
+    const activityByType: Record<string, { type: string; count: number; totalScore: number }> = {}
+    for (const record of history) {
+        const entry = (activityByType[record.activity_type] ??= {
+            type: record.activity_type,
+            count: 0,
+            totalScore: 0,
+        })
+        entry.count += 1
+        // Scores are compared as percentages: a 4/5 quiz and a 3/3 challenge are not on the same scale.
+        entry.totalScore += record.max_score ? ((record.score ?? 0) / record.max_score) * 100 : 0
+    }
 
-    const activityTypeData = Object.values(activityByType).map((item: any) => ({
+    const activityTypeData: ActivityTypeDatum[] = Object.values(activityByType).map((item) => ({
         type: item.type === 'quiz' ? 'Quizzes' : item.type === 'code' ? 'Coding' : 'Chat',
         count: item.count,
-        avgScore: item.count > 0 ? (item.totalScore / item.count).toFixed(1) : 0
+        avgScore: item.count > 0 ? `${(item.totalScore / item.count).toFixed(0)}%` : '-'
     }))
-
-    const CustomBarTooltip = ({ active, payload, label }: any) => {
-        if (active && payload && payload.length) {
-            return (
-                <GlassPanel className="p-4 !rounded-lg border-purple-200 shadow-xl bg-white/90">
-                    <p className="text-gray-800 font-medium text-sm mb-2">{label}</p>
-                    <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 rounded-full bg-purple-500" />
-                            <p className="text-gray-600 text-xs">
-                                Count: <span className="text-gray-900 font-bold">{payload[0].value}</span>
-                            </p>
-                        </div>
-                        <p className="text-gray-500 text-xs ml-4">
-                            Avg Score: <span className="text-gray-900 font-semibold">{payload[0].payload.avgScore}</span>
-                        </p>
-                    </div>
-                </GlassPanel>
-            );
-        }
-        return null;
-    };
 
     return (
         <div className="space-y-8">
@@ -144,7 +139,10 @@ export default function AnalyticsDashboard({ skillId }: AnalyticsProps) {
                             {summary.total_quizzes}
                         </p>
                         <div className="mt-4 h-1 w-full bg-gray-100 rounded-full overflow-hidden">
-                            <div className="h-full bg-gradient-to-r from-purple-500 to-pink-400 w-[70%]" />
+                            <div
+                                className="h-full bg-gradient-to-r from-purple-500 to-pink-400 transition-all duration-500"
+                                style={{ width: `${Math.min((summary.total_quizzes / 10) * 100, 100)}%` }}
+                            />
                         </div>
                     </GlassPanel>
                 </motion.div>
@@ -185,7 +183,10 @@ export default function AnalyticsDashboard({ skillId }: AnalyticsProps) {
                             {summary.code_challenges_solved}
                         </p>
                         <div className="mt-4 h-1 w-full bg-gray-100 rounded-full overflow-hidden">
-                            <div className="h-full bg-gradient-to-r from-purple-500 to-indigo-400 w-[40%]" />
+                            <div
+                                className="h-full bg-gradient-to-r from-purple-500 to-indigo-400 transition-all duration-500"
+                                style={{ width: `${Math.min((summary.code_challenges_solved / 10) * 100, 100)}%` }}
+                            />
                         </div>
                     </GlassPanel>
                 </motion.div>
@@ -266,6 +267,35 @@ export default function AnalyticsDashboard({ skillId }: AnalyticsProps) {
                                     />
                                 </div>
                             </div>
+
+                            {/* Roadmap Progress */}
+                            <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-indigo-50 rounded-lg">
+                                            <TrendingUp className="h-5 w-5 text-indigo-600" />
+                                        </div>
+                                        <span className="text-gray-700 font-medium">Roadmap Tasks Done</span>
+                                    </div>
+                                    <span className="text-2xl font-bold text-gray-800">
+                                        {summary.roadmap_tasks_done}
+                                        <span className="text-base font-medium text-gray-400">/{summary.roadmap_tasks_total}</span>
+                                    </span>
+                                </div>
+                                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                                    <div
+                                        className="h-full bg-gradient-to-r from-indigo-500 to-indigo-400 rounded-full transition-all duration-500"
+                                        style={{ width: `${summary.roadmap_tasks_total ? (summary.roadmap_tasks_done / summary.roadmap_tasks_total) * 100 : 0}%` }}
+                                    />
+                                </div>
+                            </div>
+
+                            <p className="text-sm text-gray-500">
+                                {summary.questions_asked} question{summary.questions_asked === 1 ? '' : 's'} asked to the mentor
+                                {' · '}
+                                {summary.documents_ready} of {summary.documents_total} document{summary.documents_total === 1 ? '' : 's'} ready
+                            </p>
+
 
                             {/* Code Activity */}
                             <div className="space-y-2">
